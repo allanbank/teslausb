@@ -22,71 +22,90 @@ then
   fi
 fi
 
-function linksnapshotfiletorecents {
-  local file=$1
-  local curmnt=$2
-  local finalmnt=$3
-  local recents=/backingfiles/TeslaCam/RecentClips
+function copy_file_to {
+  local group="${1}"
+  local file="${2}"
 
-  filename=${file##/*/}
-  filedate=${filename:0:10}
-  if [ ! -d $recents/$filedate ]
+  local localdir=/backingfiles/TeslaCam/${group}
+
+  local filedir=${file%/*}
+  local filename=${file##/*/}
+  local filedate=${filename:0:10}
+  local filehour=${filename:11:2}
+  local fileparentdir=${filedir##/*/}
+
+  if [ "${group}" == "RecentClips" ]
   then
-    mkdir -p $recents/$filedate
+    local destdir="${localdir}/${filedate}/${filehour}"
+  else 
+    local destdir="${localdir}/${fileparentdir}"
   fi
-  ln -sf ${file/"$curmnt"/$finalmnt} $recents/$filedate
+
+  if [ ! -d "${destdir}" ]
+  then
+    mkdir -p "${destdir}" 
+  fi
+
+  local destfile="${destdir}/${filename}"
+  if [ ! -e "${destfile}" -o "${file}" -nt "${destfile}" ]
+  then
+    log "Copying ${group}/.../${filename}"
+    # Set the copy to not interfere with the Tesla's I/O
+    ionice -t -c 3 rm -f "${destdir}/_${filename}"
+    ionice -t -c 3 cp --preserve=timestamps ${file} "${destdir}/_${filename}"
+    mv "${destdir}/_${filename}" "${destfile}"
+  fi
 }
 
-function make_links_for_snapshot {
-  local saved=/backingfiles/TeslaCam/SavedClips
-  local sentry=/backingfiles/TeslaCam/SentryClips
-  if [ ! -d $saved ]
-  then
-    mkdir -p $saved
-  fi
-  if [ ! -d $sentry ]
-  then
-    mkdir -p $sentry
-  fi
-  local curmnt="$1"
-  local finalmnt="$2"
-  log "making links for $curmnt, retargeted to $finalmnt"
-  local restore_nullglob=$(shopt -p nullglob)
-  shopt -s nullglob
-  for f in $curmnt/TeslaCam/RecentClips/*
+
+function copy_files_for_snapshot {
+  local mntpoint="$1"
+
+  for group in SentryClips SavedClips RecentClips
   do
-    #log "linking $f"
-    linksnapshotfiletorecents $f $curmnt $finalmnt
-  done
-  # also link in any files that were moved to SavedClips
-  for f in $curmnt/TeslaCam/SavedClips/*/*
-  do
-    #log "linking $f"
-    linksnapshotfiletorecents $f $curmnt $finalmnt
-    # also link it into a SavedClips folder
-    local eventfolder=${f%/*}
-    local eventtime=${eventfolder##/*/}
-    if [ ! -d $saved/$eventtime ]
-    then
-      mkdir -p $saved/$eventtime
+    if [ -d "${mntpoint}/TeslaCam/${group}" ] ; then
+      log "Copying files from ${mntpoint}/TeslaCam/${group}..."
+      find "${mntpoint}/TeslaCam/${group}" -type f -print0 |
+        while IFS= read -r -d '' file
+        do 
+          copy_file_to "${group}" "${file}"
+        done
+    else
+      log "${mntpoint}/TeslaCam/${group} does not exist. Skipping copy."
     fi
-    ln -sf ${f/"$curmnt"/$finalmnt} $saved/$eventtime
   done
-  # and the same for SentryClips
-  for f in $curmnt/TeslaCam/SentryClips/*/*
+}
+
+function free_space {
+  let need_to_free=$1
+  log "Freeing ${need_to_free} bytes of space for snapshot."
+  local freed=0
+  # Remove all RecentClips before removing any Saved or Sentry Clips.
+  for path in /backingfiles/TeslaCam/RecentClips /backingfiles/TeslaCam
   do
-    #log "linking $f"
-    linksnapshotfiletorecents $f $curmnt $finalmnt
-    local eventfolder=${f%/*}
-    local eventtime=${eventfolder##/*/}
-    if [ ! -d $sentry/$eventtime ]
+    if [ $freed -lt $need_to_free ]
     then
-      mkdir -p $sentry/$eventtime
+      find "${path}" -type f -printf "%C@ %p\n" | sort -n | sed 's/[^ ]\+ //' |
+        while read file
+        do
+          local size=$(eval $(stat --format='echo $((%b*%B))' "${file}"))
+          if rm -f "${file}"
+          then
+            let freed=freed+size
+            if [ $need_to_free -lt $freed ]
+            then
+              return 0
+            fi
+          else
+            log "Warning: Could not delete '${file}' to free space."
+          fi
+        done
+    else
+      # Freed enough space.
+      return 0
     fi
-    ln -sf ${f/"$curmnt"/$finalmnt} $sentry/$eventtime
   done
-  log "made all links for $curmnt"
-  $restore_nullglob
+  return 1
 }
 
 function snapshot {
@@ -97,58 +116,36 @@ function snapshot {
   # space requirement, to delete old snapshots just before running out
   # of space and thus make better use of space
   local imgsize=$(eval $(stat --format='echo $((%b*%B))' /backingfiles/cam_disk.bin))
-  while true
-  do
-    local freespace=$(eval $(stat --file-system --format='echo $((%f*%S))' /backingfiles/cam_disk.bin))
-    if [ $freespace -gt $imgsize ]
-    then
-      break
-    fi
-    if ! stat /backingfiles/snapshots/snap-*/snap.bin > /dev/null 2>&1
-    then
-      log "warning: low space for snapshots"
-      break
-    fi
-    oldest=$(ls -ldC1 /backingfiles/snapshots/snap-* | head -1)
-    log "low space, deleting $oldest"
-    /root/bin/release_snapshot.sh "$oldest/mnt"
-    rm -rf "$oldest"
-  done
-
-  local oldnum=-1
-  local newnum=0
-  if stat /backingfiles/snapshots/snap-*/snap.bin > /dev/null 2>&1
+  local freespace=$(eval $(stat --file-system --format='echo $((%f*%S))' /backingfiles/cam_disk.bin))
+  if [ $freespace -lt $imgsize ]
   then
-    oldnum=$(ls -lC1 /backingfiles/snapshots/snap-*/snap.bin | tail -1 | tr -c -d '[:digit:]' | sed 's/^0*//' )
-    newnum=$((oldnum + 1))
+    let need_to_free=imgsize-freespace
+    if ! free_space ${need_to_free}
+    then
+      log "Insufficient free space to take a snapshot - Aborting!"
+      return 1
+    fi
   fi
-  local oldname=/backingfiles/snapshots/snap-$(printf "%06d" $oldnum)/snap.bin
-  local newsnapdir=/backingfiles/snapshots/snap-$(printf "%06d" $newnum)
-  local newname=$newsnapdir/snap.bin
-  local tmpsnapdir=/backingfiles/snapshots/newsnap
-  local tmpsnapname=$tmpsnapdir/snap.bin
-  local tmpsnapmnt=$tmpsnapdir/mnt
-  log "taking snapshot of cam disk: $newname"
-  rm -rf "$tmpsnapdir"
-  /root/bin/mount_snapshot.sh /backingfiles/cam_disk.bin "$tmpsnapname" "$tmpsnapmnt"
-  log "took snapshot"
+  
+  local snaptime=$(date "+%Y%m%dT%H%M%S")
+  local snapdir=/backingfiles/snapshots/snap-${snaptime}
+  local snapmnt=$snapdir/mnt
+  local name=$snapdir/snap.bin
+  rm -rf "$snapdir"
+  log "Taking snapshot of cam disk: $name"
+  /root/bin/mount_snapshot.sh /backingfiles/cam_disk.bin "$name" "$snapmnt"
+  log "Took snapshot"
 
-  # check whether this snapshot is actually different from the previous one
-  find "$tmpsnapmnt/TeslaCam" -type f -printf '%s %P\n' > "$tmpsnapname.toc"
-  log "comparing $oldname.toc and $tmpsnapname.toc"
-  if [[ ! -e "$oldname.toc" ]] || diff "$oldname.toc" "$tmpsnapname.toc" | grep -e '^>'
-  then
-    make_links_for_snapshot "$tmpsnapmnt" "$newsnapdir/mnt"
-    mv "$tmpsnapdir" "$newsnapdir"
-  else
-    log "new snapshot is identical to previous one, discarding"
-    /root/bin/release_snapshot.sh "$tmpsnapmnt"
-    rm -rf "$tmpsnapdir"
-  fi
+  copy_files_for_snapshot "$snapmnt"
+
+  log "Discarding Snapshot"
+  /root/bin/release_snapshot.sh "$snapmnt"
+  rm -rf "$snapdir"
+  return 0
 }
 
 if ! snapshot
 then
-  log "failed to take snapshot"
+  log "Failed to take snapshot"
 fi
 
