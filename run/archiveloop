@@ -298,7 +298,11 @@ function archive_teslacam_clips () {
             fi
         fi
 
-        /root/bin/archive-clips.sh
+        /root/bin/archive-clips.sh -m -s "$CAM_MOUNT/TeslaCam" -p SentryClips
+        /root/bin/archive-clips.sh -m -s "$CAM_MOUNT/TeslaCam" -p SavedClips
+
+        # Remove empty directories.
+        find $CAM_MOUNT/TeslaCam/ -mindepth 2 -depth -type d -empty -exec rmdir "{}" \;
 
         # If Sentry Mode was previously disabled, restore it to that state
         if [ -x /root/bin/tesla_api.py ]
