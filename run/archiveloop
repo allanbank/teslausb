@@ -463,10 +463,42 @@ function mount_all_snapshots {
 
 
 function snapshotloop {
+  local interval=1800
+  local now=0
+  local wakeup=0
+
+  # This captures the number of seconds since epoch in 'now'.
+  printf -v now '%(%s)T' -1
+  wakeup=$((now+interval))
+
   while true
   do
-    sleep 3500
+    printf -v now '%(%s)T' -1
+    if [ $wakeup -gt $now ]
+    then
+      sleep $((wakeup-now))
+    fi
+
+    # Compute the next wakeup.
+    printf -v now '%(%s)T' -1
+    wakeup=$((now+interval))
+
     /root/bin/make_snapshot.sh
+
+    # If we can reach the archive go ahead and move the files from
+    # the local drive to the remote archive.
+    if archive_is_reachable
+    then
+      if /root/bin/connect-archive.sh
+      then
+        # We don't keep the car wake here since we are taking advantage of being
+        # connected to the archive. We only keep the car awake when we are first
+        # in contact.
+        /root/bin/archive-clips.sh -m -s "/backingfiles/TeslaCam/" -p SentryClips
+        /root/bin/archive-clips.sh -m -s "/backingfiles/TeslaCam/" -p SavedClips
+      fi
+      #/root/bin/disconnect-archive.sh
+    fi
   done
 }
 
