@@ -65,11 +65,10 @@ function copy_files_for_snapshot {
   do
     if [ -d "${mntpoint}/TeslaCam/${group}" ] ; then
       log "Copying files from ${mntpoint}/TeslaCam/${group}..."
-      find "${mntpoint}/TeslaCam/${group}" -type f -print0 |
-        while IFS= read -r -d '' file
-        do 
-          copy_file_to "${group}" "${file}"
-        done
+      while IFS= read -r -d '' file
+      do
+        copy_file_to "${group}" "${file}"
+      done < <( find "${mntpoint}/TeslaCam/${group}" -type f -print0 )
     else
       log "${mntpoint}/TeslaCam/${group} does not exist. Skipping copy."
     fi
@@ -85,21 +84,20 @@ function free_space {
   do
     if [ $freed -lt $need_to_free ]
     then
-      find "${path}" -type f -printf "%C@ %p\n" | sort -n | sed 's/[^ ]\+ //' |
-        while read file
-        do
-          local size=$(eval $(stat --format='echo $((%b*%B))' "${file}"))
-          if rm -f "${file}"
+      while IFS= read -r -d '' file
+      do
+        local size=$(eval $(stat --format='echo $((%b*%B))' "${file}"))
+        if rm -f "${file}"
+        then
+          let freed=freed+size
+          if [ $need_to_free -lt $freed ]
           then
-            let freed=freed+size
-            if [ $need_to_free -lt $freed ]
-            then
-              return 0
-            fi
-          else
-            log "Warning: Could not delete '${file}' to free space."
+            return 0
           fi
-        done
+        else
+          log "Warning: Could not delete '${file}' to free space."
+        fi
+      done < <( find "${path}" -type f -printf "%C@ %p\n" | sort -n | sed 's/[^ ]\+ //' )
     else
       # Freed enough space.
       return 0
@@ -117,12 +115,21 @@ function snapshot {
   # of space and thus make better use of space
   local imgsize=$(eval $(stat --format='echo $((%b*%B))' /backingfiles/cam_disk.bin))
   local freespace=$(eval $(stat --file-system --format='echo $((%f*%S))' /backingfiles/cam_disk.bin))
-  if [ $freespace -lt $imgsize ]
+  local fssize=$(eval $(stat --file-system --format='echo $((%b*%S))' /backingfiles/cam_disk.bin))
+  local tenpercentminfree=$(( fssize/ 10 ))
+  local wanted=$imgsize
+  if [ $imgsize -lt tenpercentminfree ]
   then
-    let need_to_free=imgsize-freespace
+    # Free the larger (10%) of the disk.
+    wanted=tenpercentminfree
+  fi
+  if [ $freespace -lt $wanted ]
+  then
+    let need_to_free=wanted-freespace
     if ! free_space ${need_to_free}
     then
-      log "Insufficient free space to take a snapshot - Aborting!"
+      local freespace=$(eval $(stat --file-system --format='echo $((%f*%S))' /backingfiles/cam_disk.bin))
+      log "Insufficient free space ($freespace) to take a snapshot. Want $wanted free. Aborting!"
       return 1
     fi
   fi
@@ -136,6 +143,7 @@ function snapshot {
   /root/bin/mount_snapshot.sh /backingfiles/cam_disk.bin "$name" "$snapmnt"
   log "Took snapshot"
 
+  fix_errors_in_image "$name"
   copy_files_for_snapshot "$snapmnt"
 
   log "Discarding Snapshot"

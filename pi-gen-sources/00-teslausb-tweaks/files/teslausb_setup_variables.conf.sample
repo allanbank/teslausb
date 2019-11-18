@@ -17,6 +17,12 @@ export sharename=your_archive_share_name
 export shareuser=username
 export sharepassword=password
 # export cifs_version="3.0"
+
+# Uncomment the following line and select drive if you want to use an external drive instead of built-in MicroSD card.
+# External USB drive is supported only for RPi4.
+# export usb_drive=/dev/sda
+
+# See comments below w/ SNAPSHOTS_ENABLED on appropriate values for the camsize when using snapshots.
 export camsize=100%
 
 # if you set camsize to less than 100%, but don't want music to use
@@ -44,7 +50,21 @@ export HEADLESS_SETUP=true
 #export SAMBA_GUEST=true
 
 # uncomment to disable snapshots. This also disables samba and RecentClips-extension
+#
+# Notes of image sizes when using snapshots:
+#  * camsize should be a fairly small explicit value to leave room for the snapshots.
+#  * musicsize also be an explicit size  but should be large enough to hold your music
+#    library (obviously)
+# Using images that fill the entire available space will make snapshots inoperable.
+# Problems have been encountered with "slow USB" from the cars that seem to correlate
+# to backing drives that are near capacity. For that reason the system tries to keep the
+# backing drive at least 10% available at all times.
 #export SNAPSHOTS_ENABLED=false
+
+# Uncomment to archive the RecentClips.
+# Defaults to false.
+# This requires SNAPSHOTS_ENABLED to be true (default).
+#export ARCHIVE_RECENT_CLIPS=true
 
 # uncomment to enable teslausb to act as a wifi access point with the given
 # SSID, so you can access it while on the road.

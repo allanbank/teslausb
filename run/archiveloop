@@ -1,5 +1,11 @@
 #!/bin/bash -eu
 
+export LOG_FILE=/mutable/archiveloop.log
+export CAM_MOUNT=/mnt/cam
+export MUSIC_MOUNT=/mnt/music
+export ARCHIVE_MOUNT=/mnt/archive
+export MUSIC_ARCHIVE_MOUNT=/mnt/musicarchive
+
 if [ "$BASH_SOURCE" != "$0" ]
 then
   echo "$BASH_SOURCE must be executed, not sourced"
@@ -21,15 +27,6 @@ then
   fi
 fi
 
-# turning off hdmi saves a little bit of power
-/usr/bin/tvservice -o
-
-export LOG_FILE=/mutable/archiveloop.log
-
-export CAM_MOUNT=/mnt/cam
-export MUSIC_MOUNT=/mnt/music
-export ARCHIVE_MOUNT=/mnt/archive
-export MUSIC_ARCHIVE_MOUNT=/mnt/musicarchive
 
 function log () {
   echo -n "$( date ): " >> "$LOG_FILE"
@@ -50,10 +47,12 @@ then
   exit 1
 fi
 
+# Utility Functions.
+#
+# Misc. Functions.
 function isPi4 {
   grep -q "Pi 4" /sys/firmware/devicetree/base/model
 }
-
 function timestamp () {
   local prefix=${1:-}
   while IFS= read line
@@ -61,55 +60,6 @@ function timestamp () {
     echo "$(date): $prefix$line"
   done
 }
-
-function fix_errors_in_image () {
-  local image="$1"
-  log "Running fsck on $image..."
-  losetup -f -P $image
-  loopback=$(losetup -j $image | awk '{print $1}' | sed 's/://')
-  /sbin/fsck ${loopback}p1 -- -a |& timestamp '| ' >> "$LOG_FILE" || echo ""
-  losetup -d $loopback
-  log "Finished fsck on $image."
-}
-
-function archive_is_reachable () {
-  local reachable=true
-
-  /root/bin/archive-is-reachable.sh "$ARCHIVE_HOST_NAME" || reachable=false
-
-  if [ "$reachable" = false ]
-  then
-    false
-    return
-  fi
-  true
-}
-
-function connect_usb_drives_to_host() {
-  log "Connecting usb to host..."
-  modprobe g_mass_storage
-  log "Connected usb to host."
-}
-
-function wait_for_archive_to_be_reachable () {
-  log "Waiting for archive to be reachable..."
-  while [ true ]
-  do
-    if archive_is_reachable
-    then
-      log "Archive is reachable."
-      break
-    fi
-    if [ -e /tmp/archive_is_reachable ]
-    then
-      log "Simulating archive is reachable"
-      rm /tmp/archive_is_reachable
-      break
-    fi
-    sleep 1
-  done
-}
-
 function retry () {
   local attempts=0
   while [ true ]
@@ -133,7 +83,82 @@ function retry () {
   false
   return
 }
+function truncate_log () {
+  local log_length=$( wc -l "$LOG_FILE" | cut -d' ' -f 1 )
+  if [ "$log_length" -gt 10000 ]
+  then
+    log "Truncating log..."
+    local log_file2="${LOG_FILE}.2"
+    tail -n 10000 "$LOG_FILE" > "${LOG_FILE}.2"
+	mv "$log_file2" "$LOG_FILE"
+  fi
+}
+function set_time () {
+  log "Waiting for time to be set by ntpd..."
+  for i in {1..10}
+  do
+    if ntp-wait --tries=1 --sleep=1
+    then
+      log "Time now set"
+      return
+    fi
+    sleep 2
+  done
+  log "Time still not set, attempting to force it"
+  if ! systemctl stop ntp
+  then
+    log "Failed to stop ntp daemon"
+  fi
+  if ! timeout 20 ntpd -q -x -g
+  then
+    log "Failed to set time"
+  fi
+  if ! systemctl start ntp
+  then
+    log "Failed to start ntp daemon"
+  fi
+}
 
+# Blink Functions.
+#
+# Slow, Fast and double blink.
+function slowblink () {
+  echo timer > /sys/class/leds/led0/trigger
+  local ON=on
+  local OFF=off
+  if isPi4
+  then
+    ON=off
+    OFF=on
+  fi
+  echo 900 > /sys/class/leds/led0/delay_$ON
+  echo 100 > /sys/class/leds/led0/delay_$OFF
+}
+function fastblink () {
+  echo timer > /sys/class/leds/led0/trigger
+  local ON=on
+  local OFF=off
+  if isPi4
+  then
+    ON=off
+    OFF=on
+  fi
+  echo 150 > /sys/class/leds/led0/delay_$ON
+  echo 50 > /sys/class/leds/led0/delay_$OFF
+}
+function doubleblink () {
+  echo heartbeat > /sys/class/leds/led0/trigger
+  if isPi4
+  then
+    echo 0 > /sys/class/leds/led0/invert
+  else
+    echo 1 > /sys/class/leds/led0/invert
+  fi
+}
+
+# Generic Mount/Unmount Functions.
+#
+# Mount, Unmount and FSCK functions.
 function mount_mountpoint () {
   local mount_point="$1"
   log "Mounting $mount_point..."
@@ -151,7 +176,6 @@ function mount_mountpoint () {
     return
   fi
 }
-
 function ensure_mountpoint_is_mounted () {
   local mount_point="$1"
   local mount_exists=true
@@ -198,15 +222,134 @@ function unmount_mount_point () {
     fi
   fi
 }
+function fix_errors_in_image () {
+  local image="$1"
+  log "Running fsck on $image..."
+  losetup -f -P $image
+  loopback=$(losetup -j $image | awk '{print $1}' | sed 's/://')
+  /sbin/fsck ${loopback}p1 -- -a |& timestamp '| ' >> "$LOG_FILE" || echo ""
+  losetup -d $loopback
+  log "Finished fsck on $image."
+}
+function fix_errors_in_files () {
+  fix_errors_in_image /backingfiles/cam_disk.bin
+  if [ -e /backingfiles/music_disk.bin ]
+  then
+    fix_errors_in_image /backingfiles/music_disk.bin
+  fi
+}
+function trim_free_space() {
+  local mount_point="$1"
 
+  # Make sure the partition is mounted.
+  if found=$(findmnt -n --mountpoint "$mount_point")
+  then
+    loop=$(echo "$found" | awk '{print $2}')
+    image=$(losetup -l -n --output=BACK-FILE "$loop")
+    log "Trimming free space in $mount_point, which has $(xfs_bmap $image | wc -l) extents"
+    if fstrim "$mount_point" >> "$LOG_FILE" 2>&1
+    then
+      log "Trim complete, image now has  $(xfs_bmap $image | wc -l) extents"
+    else
+      log "Trimming free space in $mount_point failed."
+    fi
+  fi
+}
+
+# Camera Disk Image Mount/Unmount Functions.
+#
+# Mount, Unmount and FSCK functions for the camera image.
+function ensure_cam_file_is_mounted () {
+  log "Ensuring cam file is mounted..."
+  ensure_mountpoint_is_mounted_with_retry "$CAM_MOUNT"
+  log "Ensured cam file is mounted."
+}
 function unmount_cam_file () {
   unmount_mount_point "$CAM_MOUNT"
 }
 
+
+# Music Disk Image Mount/Unmount Functions.
+#
+# Mount, Unmount and FSCK functions for the music image.
+function ensure_music_file_is_mounted () {
+  if [ -e "$MUSIC_MOUNT" ]
+  then
+    log "Ensuring music backing file is mounted..."
+    ensure_mountpoint_is_mounted_with_retry "$MUSIC_MOUNT"
+    log "Ensured music drive is mounted."
+  fi
+}
 function unmount_music_file () {
-  unmount_mount_point "$MUSIC_MOUNT"
+  if [ -e "$MUSIC_MOUNT" ]
+  then
+    unmount_mount_point "$MUSIC_MOUNT"
+  fi
+}
+function fix_errors_in_music_file () {
+  if [ -e "$MUSIC_MOUNT" ]
+  then
+    fix_errors_in_image /backingfiles/music_disk.bin
+  fi
 }
 
+# USB Drive Functions
+#
+# Connect and disconnect the images to the car via the g_mass_storage gadget.
+function connect_usb_drives_to_host() {
+  log "Connecting usb to host..."
+  modprobe g_mass_storage
+  log "Connected usb to host."
+}
+function disconnect_usb_drives_from_host () {
+  log "Disconnecting usb from host..."
+  modprobe -r g_mass_storage
+  log "Disconnected usb from host."
+}
+function check_if_usb_drives_is_mounted () {
+    if [ ! -d /sys/devices/platform/soc/??980000.usb/gadget/lun0 ]
+    then
+        log "USB Gadget not mounted. Fixing files and remounting..."
+        disconnect_usb_drives_from_host
+        fix_errors_in_files
+        connect_usb_drives_to_host
+    fi
+}
+
+
+# Archive Detection Functions
+#
+# Connect and disconnect the images to the car via the g_mass_storage gadget.
+function archive_is_reachable () {
+  local reachable=true
+
+  /root/bin/archive-is-reachable.sh "$ARCHIVE_HOST_NAME" || reachable=false
+
+  if [ "$reachable" = false ]
+  then
+    false
+    return
+  fi
+  true
+}
+function wait_for_archive_to_be_reachable () {
+  log "Waiting for archive to be reachable..."
+  while [ true ]
+  do
+    if archive_is_reachable
+    then
+      log "Archive is reachable."
+      break
+    fi
+    if [ -e /tmp/archive_is_reachable ]
+    then
+      log "Simulating archive is reachable"
+      rm /tmp/archive_is_reachable
+      break
+    fi
+    sleep 1
+  done
+}
 function wait_for_archive_to_be_unreachable () {
   log "Waiting for archive to be unreachable..."
   while [ true ]
@@ -226,51 +369,210 @@ function wait_for_archive_to_be_unreachable () {
   done
 }
 
-function check_if_usb_gadget_is_mounted () {
-    if [ ! -d /sys/devices/platform/soc/??980000.usb/gadget/lun0 ]
+# Sentry Mode Functions.
+#
+# Functions to turn sentry mode on and off.
+# Uses the global 'is_sentry_mode_enabled'
+declare is_sentry_mode_enabled
+function turn_sentry_mode_on () {
+  if [ -x /root/bin/tesla_api.py ]
+  then
+    is_sentry_mode_enabled=$(/root/bin/tesla_api.py is_sentry_mode_enabled | tr '[:upper:]' '[:lower:]')
+    if [ "false" = "${is_sentry_mode_enabled}" ]
     then
-        log "USB Gadget not mounted. Fixing files and remounting..."
-        disconnect_usb_drives_from_host
-        mount_and_fix_errors_in_files
-        connect_usb_drives_to_host
+      log "Temporarily enabling Sentry Mode to power the RPi while archive job completes..."
+      /root/bin/tesla_api.py enable_sentry_mode &>> ${LOG_FILE}
     fi
+  fi
+}
+function turn_sentry_mode_off () {
+  if [ -x /root/bin/tesla_api.py ]
+  then
+	  if [ "false" = "${is_sentry_mode_enabled}" ]
+	  then
+	    log "Restoring Sentry Mode to its previous state (disabled)..."
+      /root/bin/tesla_api.py disable_sentry_mode &>> ${LOG_FILE}
+	  fi
+	fi
 }
 
-function trim_free_space() {
-  local mount_point="$1"
+if [ "${SNAPSHOTS_ENABLED:-true}" = "true" ]
+then
+  function mv_file_to {
+    local group="${1}"
+    local file="${2}"
 
-  # Make sure the partition is mounted.
-  if found=$(findmnt -n --mountpoint "$mount_point")
-  then
-    loop=$(echo $found | awk '{print $2}')
-    image=$(losetup -l -n --output=BACK-FILE $loop)
-    log "Trimming free space in $mount_point, which has $(xfs_bmap $image | wc -l) extents"
-    if fstrim "$mount_point" >> "$LOG_FILE" 2>&1
+    local localdir=/backingfiles/TeslaCam/${group}
+
+    local filedir=${file%/*}
+    local filename=${file##/*/}
+    local filedate=${filename:0:10}
+    local filehour=${filename:11:2}
+    local fileparentdir=${filedir##/*/}
+
+    if [ "${group}" == "RecentClips" ]
     then
-      log "Trim complete, image now has  $(xfs_bmap $image | wc -l) extents"
+      local destdir="${localdir}/${filedate}/${filehour}"
     else
-      log "Trimming free space in $mount_point failed."
+      local destdir="${localdir}/${fileparentdir}"
     fi
-  else
-    log "Could not trim free space in $mount_point. Not Mounted."
-  fi
-}
 
-function mount_and_fix_errors_in_files () {
-  fix_errors_in_image /backingfiles/cam_disk.bin
-  if [ -e /backingfiles/music_disk.bin ]
-  then
-    fix_errors_in_image /backingfiles/music_disk.bin
-  fi
-}
+    if [ ! -d "${destdir}" ]
+    then
+      mkdir -p "${destdir}"
+    fi
 
-function disconnect_usb_drives_from_host () {
-  log "Disconnecting usb from host..."
-  modprobe -r g_mass_storage
-  log "Disconnected usb from host."
-}
+    local destfile="${destdir}/${filename}"
+    if [ ! -e "${destfile}" -o "${file}" -nt "${destfile}" ]
+    then
+      log "Moving ${group}/.../${filename}"
+      # Set the copy to not interfere with the Tesla's I/O
+      ionice -t -c 3 rm -f "${destdir}/_${filename}"
+      ionice -t -c 3 cp --preserve=timestamps ${file} "${destdir}/_${filename}"
+      mv "${destdir}/_${filename}" "${destfile}"
+    else
+      rm ${file}
+    fi
+  }
+  function mv_from_image {
+    local mntpoint="$1"
 
-function archive_teslacam_clips () {
+    for group in SentryClips SavedClips RecentClips
+    do
+      if [ -d "${mntpoint}/TeslaCam/${group}" ] ; then
+        log "Moving files from ${mntpoint}/TeslaCam/${group}..."
+        while IFS= read -r -d '' file
+        do
+          mv_file_to "${group}" "${file}"
+        done < <( find "${mntpoint}/TeslaCam/${group}" -type f -print0 )
+      else
+        log "${mntpoint}/TeslaCam/${group} does not exist. Skipping move."
+      fi
+    done
+  }
+  function archive_teslacam_clips () {
+    # Take a snapshot right before we start archiving files.
+    /root/bin/make_snapshot.sh
+
+    # Detach from the car so we own the drive.
+    disconnect_usb_drives_from_host
+
+    # mount, fsck $CAM_MOUNT
+    ensure_cam_file_is_mounted
+
+    # Copy the files out locally. This will remove the files and because of the
+    # snapshot above should be largely just deleting files.
+    mv_from_image "$CAM_MOUNT"
+    find $CAM_MOUNT/TeslaCam/ -mindepth 2 -depth -type d -empty -exec rmdir "{}" \;
+
+    # Trim the camera archive to reduce the number of blocks in the snapshot.
+    trim_free_space "$CAM_MOUNT"
+
+    # We can now give the mount back to the car.
+    unmount_cam_file
+    connect_usb_drives_to_host
+
+    # Now that the car has the drive back we can do the archive.
+    /root/bin/archive-clips.sh -m -s "/backingfiles/TeslaCam" -p SentryClips
+    /root/bin/archive-clips.sh -m -s "/backingfiles/TeslaCam" -p SavedClips
+    if [ "${ARCHIVE_RECENT_CLIPS:-false}" = "true" ]
+    then
+      /root/bin/archive-clips.sh -m -s "/backingfiles/TeslaCam" -p RecentClips
+    fi
+
+    # Remove empty directories.
+    find /backingfiles/TeslaCam -mindepth 2 -depth -type d -empty -exec rmdir "{}" \;
+  }
+  function cleanup_snapshots {
+    for mount in /backingfiles/snapshots/snap-*/mnt
+    do
+      umount ${mount}
+    done
+    rm -rf  /backingfiles/snapshots/snap-*/snap.bin &> /dev/null
+    log "Removed all old snapshots"
+  }
+  function snapshotloop {
+    local interval=1800
+    local now=0
+    local wakeup=0
+
+    cleanup_snapshots
+
+    # This captures the number of seconds since epoch in 'now'.
+    printf -v now '%(%s)T' -1
+    wakeup=$((now+interval))
+
+    while true
+    do
+      printf -v now '%(%s)T' -1
+      if [ $wakeup -gt $now ]
+      then
+        sleep $((wakeup-now))
+      fi
+
+      # Compute the next wakeup.
+      printf -v now '%(%s)T' -1
+      wakeup=$((now+interval))
+
+      /root/bin/make_snapshot.sh
+
+      # If we can reach the archive go ahead and move the files from
+      # the local drive to the remote archive.
+      if archive_is_reachable
+      then
+        if /root/bin/connect-archive.sh
+        then
+          # We don't keep the car awake here since we are taking advantage of being
+          # connected to the archive. We only keep the car awake when we are in the main archive loop.
+          /root/bin/archive-clips.sh -c -s "/backingfiles/TeslaCam/" -p SentryClips
+          /root/bin/archive-clips.sh -c -s "/backingfiles/TeslaCam/" -p SavedClips
+        fi
+        /root/bin/disconnect-archive.sh
+      fi
+    done
+  }
+  function copy_music_files () {
+    log "Starting music sync..."
+
+    # Make sure nothing is mounted on $MUSIC_MOUNT
+    unmount_music_file
+    /root/bin/release_music_snapshot.sh
+
+    # Take a snapshot of the music image to update.
+    /root/bin/make_music_snapshot.sh
+
+    # Update the music.
+    /root/bin/copy-music.sh
+
+    # Trim the empty space from the music archive.
+    trim_free_space "$MUSIC_MOUNT"
+
+    # Unmount the snapshot - Updated copy is /backingfiles/music_disk.bin.snap.
+    /root/bin/release_music_snapshot.sh
+
+    # Now swap the images.
+    disconnect_usb_drives_from_host
+
+    rm -f /backingfiles/music_disk.bin.old
+    if mv /backingfiles/music_disk.bin /backingfiles/music_disk.bin.old
+    then
+      if mv /backingfiles/music_disk.bin.snap /backingfiles/music_disk.bin
+      then
+        log "Updated Music from Archive via snapshot."
+       else
+         mv -f /backingfiles/music_disk.bin.old /backingfiles/music_disk.bin
+         log "Final move failed on  update Music from Archive via snapshot."
+      fi
+    else
+      log "Move failed on  update Music from Archive via snapshot."
+    fi
+
+    connect_usb_drives_to_host
+
+    rm -r /backingfiles/music_disk.bin.old
+  }
+else
+  function archive_teslacam_clips () {
     log "Checking saved folder count..."
 
     ensure_cam_file_is_mounted
@@ -279,24 +581,12 @@ function archive_teslacam_clips () {
     FILE_COUNT=$(cd "$CAM_MOUNT"/TeslaCam && find . -maxdepth 3 -path './SavedClips/*' -type f -o -path './SentryClips/*' -type f | wc -l)
   
     log "There are $DIR_COUNT event folder(s) with $FILE_COUNT file(s) to move."
-  
+
     if [ $DIR_COUNT -gt 0 ]
     then
         log "Starting recording archiving: $DIR_COUNT event folder(s) with $FILE_COUNT file(s)"
 
         /root/bin/send-push-message "TeslaUSB:" "Archiving $DIR_COUNT event folder(s) with $FILE_COUNT file(s) starting at $(date)"
-
-        # Ensure Sentry Mode is enabled before archiving
-        declare is_sentry_mode_enabled
-        if [ -x /root/bin/tesla_api.py ]
-        then
-            is_sentry_mode_enabled=$(/root/bin/tesla_api.py is_sentry_mode_enabled | tr '[:upper:]' '[:lower:]')
-            if [ "false" = "${is_sentry_mode_enabled}" ]
-            then
-                log "Temporarily enabling Sentry Mode to power the RPi while archive job completes..."
-                /root/bin/tesla_api.py enable_sentry_mode &>> ${LOG_FILE}
-            fi
-        fi
 
         /root/bin/archive-clips.sh -m -s "$CAM_MOUNT/TeslaCam" -p SentryClips
         /root/bin/archive-clips.sh -m -s "$CAM_MOUNT/TeslaCam" -p SavedClips
@@ -304,38 +594,44 @@ function archive_teslacam_clips () {
         # Remove empty directories.
         find $CAM_MOUNT/TeslaCam/ -mindepth 2 -depth -type d -empty -exec rmdir "{}" \;
 
-        # If Sentry Mode was previously disabled, restore it to that state
-        if [ -x /root/bin/tesla_api.py ]
-        then
-	    if [ "false" = "${is_sentry_mode_enabled}" ]
-	    then
-	        log "Restoring Sentry Mode to its previous state (disabled)..."
-   	         /root/bin/tesla_api.py disable_sentry_mode &>> ${LOG_FILE}
-	    fi
-	fi
+        # Trim the camera archive to reduce the number of blocks in the snapshot.
+        trim_free_space "$CAM_MOUNT"
     fi
 
     # Trim the camera archive to reduce the number of blocks in the snapshot.
     trim_free_space "$CAM_MOUNT"
 
     unmount_cam_file
-}
+    connect_usb_drives_to_host
+  }
+  function copy_music_files () {
+    log "Starting music sync..."
 
-function copy_music_files () {
-  log "Starting music sync..."
+    disconnect_usb_drives_from_host
 
-  ensure_music_file_is_mounted
+    fix_errors_in_music_file
 
-  /root/bin/copy-music.sh
+    ensure_music_file_is_mounted
 
-  # Trim the empty space from the music archive.
-  trim_free_space "$MUSIC_MOUNT"
+    /root/bin/copy-music.sh
 
-  unmount_music_file
-}
+    # Trim the empty space from the music archive.
+    trim_free_space "$MUSIC_MOUNT"
+
+    unmount_music_file
+    connect_usb_drives_to_host
+  }
+  function snapshotloop {
+    return 0
+  }
+fi
+
 
 function archive_clips () {
   log "Archiving..."
+
+  # Enable sentry mode to keep the power on, if we can.
+  turn_sentry_mode_on
 
   if ! /root/bin/connect-archive.sh
   then
@@ -364,142 +660,9 @@ function archive_clips () {
   fi
 
   /root/bin/disconnect-archive.sh
-}
 
-function truncate_log () {
-  local log_length=$( wc -l "$LOG_FILE" | cut -d' ' -f 1 )
-  if [ "$log_length" -gt 10000 ]
-  then
-    log "Truncating log..."
-    local log_file2="${LOG_FILE}.2"
-    tail -n 10000 "$LOG_FILE" > "${LOG_FILE}.2"
-	mv "$log_file2" "$LOG_FILE"
-  fi
-}
-
-function slowblink () {
-  echo timer > /sys/class/leds/led0/trigger
-  local ON=on
-  local OFF=off
-  if isPi4
-  then
-    ON=off
-    OFF=on
-  fi
-  echo 900 > /sys/class/leds/led0/delay_$ON
-  echo 100 > /sys/class/leds/led0/delay_$OFF
-}
-
-function fastblink () {
-  echo timer > /sys/class/leds/led0/trigger
-  local ON=on
-  local OFF=off
-  if isPi4
-  then
-    ON=off
-    OFF=on
-  fi
-  echo 150 > /sys/class/leds/led0/delay_$ON
-  echo 50 > /sys/class/leds/led0/delay_$OFF
-}
-
-
-function doubleblink () {
-  echo heartbeat > /sys/class/leds/led0/trigger
-  if isPi4
-  then
-    echo 0 > /sys/class/leds/led0/invert
-  else
-    echo 1 > /sys/class/leds/led0/invert
-  fi
-}
-
-function set_time () {
-  log "Waiting for time to be set by ntpd..."
-  for i in {1..10}
-  do
-    if ntp-wait --tries=1 --sleep=1
-    then
-      log "Time now set"
-      return
-    fi
-    sleep 2
-  done
-  log "Time still not set, attempting to force it"
-  if ! systemctl stop ntp
-  then
-    log "Failed to stop ntp daemon"
-  fi
-  if ! timeout 20 ntpd -q -x -g
-  then
-    log "Failed to set time"
-  fi
-  if ! systemctl start ntp
-  then
-    log "Failed to start ntp daemon"
-  fi
-}
-
-function mount_all_snapshots {
-  if ! stat /backingfiles/snapshots/snap-*/snap.bin &> /dev/null
-  then
-    log "no snapshots"
-    return
-  fi
-
-  for img in /backingfiles/snapshots/snap-*/snap.bin
-  do
-    log "mounting snapshot $img"
-    imgdir=$(dirname "$img")
-    if mount | grep "$imgdir/mnt"
-    then
-      echo "$img already mounted"
-      return
-    fi
-    /root/bin/mount_image.sh "$img" "$imgdir/mnt"
-  done
-  log "mounted all snapshots"
-}
-
-
-function snapshotloop {
-  local interval=1800
-  local now=0
-  local wakeup=0
-
-  # This captures the number of seconds since epoch in 'now'.
-  printf -v now '%(%s)T' -1
-  wakeup=$((now+interval))
-
-  while true
-  do
-    printf -v now '%(%s)T' -1
-    if [ $wakeup -gt $now ]
-    then
-      sleep $((wakeup-now))
-    fi
-
-    # Compute the next wakeup.
-    printf -v now '%(%s)T' -1
-    wakeup=$((now+interval))
-
-    /root/bin/make_snapshot.sh
-
-    # If we can reach the archive go ahead and move the files from
-    # the local drive to the remote archive.
-    if archive_is_reachable
-    then
-      if /root/bin/connect-archive.sh
-      then
-        # We don't keep the car wake here since we are taking advantage of being
-        # connected to the archive. We only keep the car awake when we are first
-        # in contact.
-        /root/bin/archive-clips.sh -m -s "/backingfiles/TeslaCam/" -p SentryClips
-        /root/bin/archive-clips.sh -m -s "/backingfiles/TeslaCam/" -p SavedClips
-      fi
-      #/root/bin/disconnect-archive.sh
-    fi
-  done
+  # Disable sentry mode to let the car go to sleep.
+  turn_sentry_mode_off
 }
 
 export ARCHIVE_HOST_NAME
@@ -508,17 +671,15 @@ export -f ensure_mountpoint_is_mounted
 export -f retry
 export -f ensure_mountpoint_is_mounted_with_retry
 export -f log
+export -f fix_errors_in_image
 
 echo "==============================================" >> "$LOG_FILE"
 log "Starting archiveloop..."
 
-mount_all_snapshots
+# turning off hdmi saves a little bit of power
+/usr/bin/tvservice -o
 
-if [ "${SNAPSHOTS_ENABLED:-true}" = "true" ]
-then
-  /root/bin/make_snapshot.sh
-  snapshotloop &
-fi
+snapshotloop &
 
 mount_and_fix_errors_in_files
 
@@ -538,6 +699,9 @@ then
 else
   slowblink
 
+  # Let make sure the drives are in good shape.
+  disconnect_usb_drives_from_host
+  fix_errors_in_files
   connect_usb_drives_to_host
 fi
 
@@ -547,31 +711,16 @@ do
 
   wait_for_archive_to_be_reachable
 
+  # Start the archive loop.
   fastblink
-
   set_time
-
   sleep ${ARCHIVE_DELAY:-20}
 
-  if [ "${SNAPSHOTS_ENABLED:-true}" = "true" ]
-  then
-    # take a snapshot before archive_clips starts deleting files
-    /root/bin/make_snapshot.sh
-  fi
-
-  disconnect_usb_drives_from_host
-
-  mount_and_fix_errors_in_files
-
   archive_clips
-
   truncate_log
-
   doubleblink
-
-  connect_usb_drives_to_host
 
   wait_for_archive_to_be_unreachable
 
-  check_if_usb_gadget_is_mounted
+  check_if_usb_drives_is_mounted
 done
