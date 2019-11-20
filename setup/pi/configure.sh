@@ -224,7 +224,7 @@ function check_ifttt_configuration () {
 function check_sns_configuration () {
     if [ ! -z "${sns_enabled+x}" ]
     then
-        if [ ! -n "${aws_access_key_id+x}" ] || [ ! -n "${aws_secret_key+x}" || [ ! -n "${aws_sns_topic_arn+x}"  ]
+        if [ ! -n "${aws_access_key_id+x}" ] || [ ! -n "${aws_secret_key+x}" ] || [ ! -n "${aws_sns_topic_arn+x}"  ]
         then
             echo "STOP: You're trying to setup AWS SNS but didn't provide your User and/or App key and/or topic ARN."
             echo "Define the variables like this:"
@@ -232,7 +232,7 @@ function check_sns_configuration () {
             echo "export aws_secret_key=put_your_secretkey_here"
             echo "export aws_sns_topic_arn=put_your_sns_topicarn_here"
             exit 1
-        elif [ "${aws_access_key_id}" = "put_your_accesskeyid_here" ] || [  "${aws_secret_key}" = "put_your_secretkey_here"  || [  "${aws_sns_topic_arn}" = "put_your_sns_topicarn_here" ]
+        elif [ "${aws_access_key_id}" = "put_your_accesskeyid_here" ] || [  "${aws_secret_key}" = "put_your_secretkey_here" ] || [  "${aws_sns_topic_arn}" = "put_your_sns_topicarn_here" ]
         then
             echo "STOP: You're trying to setup SNS, but didn't replace the default values."
             exit 1
@@ -348,9 +348,12 @@ check_archive_configs
 
 configFile=/root/teslausb.conf
 
-echo "ARCHIVE_HOST_NAME=$archiveserver" > $configFile
-echo "ARCHIVE_DELAY=${archivedelay:-20}" >> $configFile
-echo "SNAPSHOTS_ENABLED=${SNAPSHOTS_ENABLED:-true}" >> $configFile
+{
+  echo "ARCHIVE_HOST_NAME=$archiveserver"
+  echo "ARCHIVE_DELAY=${archivedelay:-20}"
+  echo "SNAPSHOTS_ENABLED=${SNAPSHOTS_ENABLED:-true}"
+  echo "ARCHIVE_RECENT_CLIPS=${ARCHIVE_RECENT_CLIPS:-false}"
+} > $configFile
 
 archive_module="$( get_archive_module )"
 log_progress "Using archive module: $archive_module"

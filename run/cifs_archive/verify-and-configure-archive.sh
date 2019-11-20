@@ -13,7 +13,7 @@ function log_progress () {
 function check_archive_server_reachable () {
   log_progress "Verifying that the archive server $archiveserver is reachable..."
   local serverunreachable=false
-  hping3 -c 1 -S -p 445 "$archiveserver" 1>/dev/null 2>&1 || serverunreachable=true
+  nc -z -w 5 "$archiveserver" 445 > /dev/null 2>&1 || serverunreachable=true
 
   if [ "$serverunreachable" = true ]
   then
@@ -85,7 +85,7 @@ function check_archive_mountable () {
 
 function install_required_packages () {
   log_progress "Installing/updating required packages if needed"
-  apt-get -y --force-yes install hping3
+  # apt-get -y --force-yes install <packagename>
   log_progress "Done"
 }
 

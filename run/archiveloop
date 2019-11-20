@@ -62,7 +62,7 @@ function timestamp () {
 }
 function retry () {
   local attempts=0
-  while [ true ]
+  while true
   do
     if eval "$@"
     then
@@ -431,6 +431,7 @@ then
       ionice -t -c 3 cp --preserve=timestamps ${file} "${destdir}/_${filename}"
       mv "${destdir}/_${filename}" "${destfile}"
     else
+      log "Removing ${group}/.../${filename} - Already copied."
       rm ${file}
     fi
   }
@@ -484,17 +485,18 @@ then
     find /backingfiles/TeslaCam -mindepth 2 -depth -type d -empty -exec rmdir "{}" \;
   }
   function cleanup_snapshots {
-    for mount in /backingfiles/snapshots/snap-*/mnt
+    while IFS= read -r -d '' snapdir
     do
-      umount ${mount}
-    done
-    rm -rf  /backingfiles/snapshots/snap-*/snap.bin &> /dev/null
-    log "Removed all old snapshots"
+      log "Removing all old snapshot: ${snapdir}"
+      umount "${snapdir}/mnt" || true
+      rm -rf  "${snapdir}" &> /dev/null
+    done < <( find "/backingfiles/snapshots/" -mindepth 1 -maxdepth 1 -type d -name "snap*" -print0 )
   }
   function snapshotloop {
-    local interval=1800
+    local interval=900
     local now=0
     local wakeup=0
+    local inactivecount=0
 
     cleanup_snapshots
 
@@ -507,27 +509,58 @@ then
       printf -v now '%(%s)T' -1
       if [ $wakeup -gt $now ]
       then
-        sleep $((wakeup-now))
+        local tosleep=$((wakeup-now))
+        log "SNAP: Periodic snapshot sleeping ${tosleep} seconds."
+        sleep ${tosleep}
       fi
 
       # Compute the next wakeup.
       printf -v now '%(%s)T' -1
       wakeup=$((now+interval))
 
+      local prefilecount=$( find /backingfiles/TeslaCam -type f | wc -l )
+      log "SNAP: Periodic snapshot started."
       /root/bin/make_snapshot.sh
+      local postfilecount=$( find /backingfiles/TeslaCam -type f | wc -l )
+
+      if [ "${prefilecount}" = "${postfilecount}" ]
+      then
+        # There were no new files in the snapshot.
+        inactivecount=$((inactivecount+1))
+        if [ $inactivecount -gt 1 ] # About 30 minutes.
+        then
+          # remout the drives to the car to try and fix the situation.
+          log "SNAP: CAM drive inactive $inactivecount times in a row. Reconnecting USB..."
+          disconnect_usb_drives_from_host
+          sleep 5
+          check_if_usb_drives_is_mounted
+        else
+          log "SNAP: CAM drive inactive $inactivecount times in a row."
+        fi
+      else
+        inactivecount=0
+      fi
 
       # If we can reach the archive go ahead and move the files from
       # the local drive to the remote archive.
-      if archive_is_reachable
+      if archive_is_reachable && [ -n "$ARCHIVE_MOUNT" ] && ! findmnt --mountpoint "$ARCHIVE_MOUNT" > /dev/null
       then
+        log "SNAP: Attempting a periodic archive."
         if /root/bin/connect-archive.sh
         then
           # We don't keep the car awake here since we are taking advantage of being
           # connected to the archive. We only keep the car awake when we are in the main archive loop.
           /root/bin/archive-clips.sh -c -s "/backingfiles/TeslaCam/" -p SentryClips
           /root/bin/archive-clips.sh -c -s "/backingfiles/TeslaCam/" -p SavedClips
+          if [ "${ARCHIVE_RECENT_CLIPS:-false}" = "true" ]
+          then
+            /root/bin/archive-clips.sh -c -s "/backingfiles/TeslaCam" -p RecentClips
+          fi
         fi
-        /root/bin/disconnect-archive.sh
+        if ! /root/bin/disconnect-archive.sh
+        then
+          log "SNAP: Disconnect of the archive failed."
+        fi
       fi
     done
   }
