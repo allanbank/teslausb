@@ -5,12 +5,13 @@ SEC_OPT=
 
 function log_progress () {
   if typeset -f setup_progress > /dev/null; then
-    setup_progress "verify-and-configure-archive: $@"
+    setup_progress "verify-and-configure-archive: $*"
   fi
   echo "verify-and-configure-archive: $1"
 }
 
 function check_archive_server_reachable () {
+  # shellcheck disable=SC2154
   log_progress "Verifying that the archive server $archiveserver is reachable..."
   local serverunreachable=false
   nc -z -w 5 "$archiveserver" 445 > /dev/null 2>&1 || serverunreachable=true
@@ -92,7 +93,9 @@ function install_required_packages () {
 install_required_packages
 
 check_archive_server_reachable
+# shellcheck disable=SC2154
 check_archive_mountable "$archiveserver" "$sharename"
+# shellcheck disable=SC2154
 if [ ! -z ${musicsharename:+x} ]
 then
   check_archive_mountable "$archiveserver" "$musicsharename"
@@ -114,7 +117,8 @@ function configure_archive () {
 
   if ! grep -w -q "$archive_path" /etc/fstab
   then
-    local sharenameforstab=$(echo $sharename | sed 's/ /\\040/g')
+    local sharenameforstab
+    sharenameforstab="${sharename// /\\040}"
     echo "//$archiveserver/$sharenameforstab $archive_path cifs credentials=${credentials_file_path},iocharset=utf8,file_mode=0777,dir_mode=0777,$VERS_OPT,$SEC_OPT 0" >> /etc/fstab
   fi
 
@@ -126,7 +130,8 @@ function configure_archive () {
     fi
     if ! grep -w -q "$music_archive_path" /etc/fstab
     then
-      local musicsharenameforstab=$(echo $musicsharename | sed 's/ /\\040/g')
+      local musicsharenameforstab
+      musicsharenameforstab="${musicsharename// /\\040}"
       echo "//$archiveserver/$musicsharenameforstab $music_archive_path cifs credentials=${credentials_file_path},iocharset=utf8,file_mode=0777,dir_mode=0777,$VERS_OPT,$SEC_OPT 0" >> /etc/fstab
     fi
   fi

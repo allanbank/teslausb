@@ -22,7 +22,7 @@ SETUP_LOGFILE=/boot/teslausb-headless-setup.log
 
 function setup_progress () {
   echo "$( date ) : $1" >> "$SETUP_LOGFILE" || echo "can't write to $SETUP_LOGFILE"
-  echo $1
+  echo "$1"
 }
 
 function get_script () {
@@ -40,7 +40,7 @@ function get_script () {
 
 function enable_wifi () {
   setup_progress "Detecting whether to update wpa_supplicant.conf"
-  if [[ ! -z $SSID ]] && [[ ! -z $WIFIPASS ]]
+  if [[ -n "$SSID" ]] && [[ -n "$WIFIPASS" ]]
   then
       if [ ! -e /boot/WIFI_ENABLED ]
       then
@@ -55,8 +55,9 @@ function enable_wifi () {
         cp /boot/wpa_supplicant.conf /etc/wpa_supplicant/wpa_supplicant.conf
 
         # set the host name now if possible, so it's effective immediately after the reboot
-        local old_host_name=$(cat /etc/hostname)
-        if [[ ! -z "$TESLAUSB_HOSTNAME" ]] && [[ "$TESLAUSB_HOSTNAME" != "$old_host_name" ]]
+        local old_host_name
+        old_host_name=$(cat /etc/hostname)
+        if [[ -n "$TESLAUSB_HOSTNAME" ]] && [[ "$TESLAUSB_HOSTNAME" != "$old_host_name" ]]
         then
           local new_host_name="$TESLAUSB_HOSTNAME"
           sed -i -e "s/$old_host_name/$new_host_name/g" /etc/hosts
@@ -108,7 +109,7 @@ then
 
     # Grab the setup variables. Should still be there since setup isn't finished.
     # This is a double check to cover various scenarios of mixed headless/not headless setup attempts
-    if [ -e "/boot/teslausb_setup_variables.conf" -a ! -e  "/root/teslausb_setup_variables.conf" ]
+    if [ -e "/boot/teslausb_setup_variables.conf" ] && [ ! -e  "/root/teslausb_setup_variables.conf" ]
     then
       mv /boot/teslausb_setup_variables.conf /root/
       dos2unix /root/teslausb_setup_variables.conf

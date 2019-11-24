@@ -2,7 +2,7 @@
 
 # Copies or moves files to "$drive:$path" via rclone.
 
-script=$(basename $0)
+script=$(basename "$0")
 function usage() {
   echo "usage: $script [-m|-c] -s <source> -p <path>" >&2
   echo "        -m, -c: Do a [m]ove or [c]opy of the files." >&2
@@ -18,23 +18,28 @@ op="Copy"
 op_future="Copying"
 op_past="Copied"
 cmd="copy --create-empty-src-dirs"
-while getopts 's:p:m' OPTION; do
+while getopts 's:p:mc' OPTION; do
   case "$OPTION" in
-    s) src="$OPTARG" ;;
-    p) extpath="$OPTARG" ;;
+    s) src="$OPTARG"
+       ;;
+    p) extpath="$OPTARG"
+       ;;
     m) op="Move"
        op_future='Moving'
        op_past="Moved"
-       cmd="move --create-empty-src-dirs --delete-empty-src-dirs" ;;
+       cmd="move --create-empty-src-dirs --delete-empty-src-dirs"
+       ;;
     c) op="Copy"
        op_future='Copying'
        op_past="Copied"
-       cmd="copy --create-empty-src-dirs" ;;
+       cmd="copy --create-empty-src-dirs"
+       ;;
     *) usage; 
-       exit 1;;
+       exit 1
+       ;;
   esac
 done
-shift "$(($OPTIND -1))"
+shift "$((OPTIND -1))"
 
 # Verify the src and extpath are set.
 if [ ! -d "$src/$extpath" ]
@@ -47,10 +52,12 @@ source /root/.teslaCamRcloneConfig
 
 file_count=$(find "$src/$extpath" -type f | wc -l)
 lastdir=$(basename "$extpath")
+# shellcheck disable=SC2154
+# shellcheck disable=SC2086
 rclone --config /root/.config/rclone/rclone.conf \
        ${cmd} \
        "$src/$extpath" \
-       "$drive:$path"/${lastdir}/ \
+       "$drive:$path/${lastdir}/" \
        >> "$LOG_FILE" 2>&1 || echo ""
 
 files_remaining=$(find "$src/$extpath" -type f | wc -l)

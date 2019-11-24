@@ -1,15 +1,15 @@
 #!/bin/bash -eu
 
-if [ "$BASH_SOURCE" != "$0" ]
+if [ "${BASH_SOURCE[0]}" != "$0" ]
 then
-  echo "$BASH_SOURCE must be executed, not sourced"
+  echo "${BASH_SOURCE[0]} must be executed, not sourced"
   return 1 # shouldn't use exit when sourced
 fi
 
 if [ "${FLOCKED:-}" != "$0" ]
 then
-  mkdir -p $MUSIC_MOUNT
-  if FLOCKED="$0" flock -E 99 $MUSIC_MOUNT "$0" "$@" || case "$?" in
+  mkdir -p "$MUSIC_MOUNT"
+  if FLOCKED="$0" flock -E 99 "$MUSIC_MOUNT" "$0" "$@" || case "$?" in
   99) echo "failed to lock musicsnapshot dir"
       exit 99
       ;;
@@ -29,10 +29,15 @@ function snapshot {
   # todo: this could be put in a background task and with a lower free
   # space requirement, to delete old snapshots just before running out
   # of space and thus make better use of space
-  local imgsize=$(eval $(stat --format='echo $((%b*%B))' /backingfiles/music_disk.bin))
-  local freespace=$(eval $(stat --file-system --format='echo $((%f*%S))' /backingfiles/music_disk.bin))
-  local fssize=$(eval $(stat --file-system --format='echo $((%b*%S))' /backingfiles/music_disk.bin))
-  if [ $freespace -lt $imgsize ]
+  local imgsize
+  local freespace
+
+  # shellcheck disable=SC2046
+  imgsize=$(eval $(stat --format="echo \$((%b*%B))" /backingfiles/music_disk.bin))
+  # shellcheck disable=SC2046
+  freespace=$(eval $(stat --file-system --format="echo \$((%f*%S))" /backingfiles/music_disk.bin))
+
+  if [ "$freespace" -lt "$imgsize" ]
   then
     log "Insufficient free space ($freespace) to take a music snapshot. Want $imgsize free. Aborting!"
     return 1

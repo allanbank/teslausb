@@ -1,8 +1,8 @@
 #!/bin/bash -eu
 
-if [ "$BASH_SOURCE" != "$0" ]
+if [ "${BASH_SOURCE[0]}" != "$0" ]
 then
-  echo "$BASH_SOURCE must be executed, not sourced"
+  echo "${BASH_SOURCE[0]} must be executed, not sourced"
   return 1 # shouldn't use exit when sourced
 fi
 
@@ -47,12 +47,12 @@ function copy_file_to {
   fi
 
   local destfile="${destdir}/${filename}"
-  if [ ! -e "${destfile}" -o "${file}" -nt "${destfile}" ]
+  if [ ! -e "${destfile}" ] || [ "${file}" -nt "${destfile}" ]
   then
     log "Copying ${group}/.../${filename}"
     # Set the copy to not interfere with the Tesla's I/O
     ionice -t -c 3 rm -f "${destdir}/_${filename}"
-    ionice -t -c 3 cp --preserve=timestamps ${file} "${destdir}/_${filename}"
+    ionice -t -c 3 cp --preserve=timestamps "${file}" "${destdir}/_${filename}"
     mv "${destdir}/_${filename}" "${destfile}"
   fi
 }
@@ -76,21 +76,24 @@ function copy_files_for_snapshot {
 }
 
 function free_space {
-  let need_to_free=$1
-  log "Freeing ${need_to_free} bytes of space for snapshot."
+  readonly need_to_free="$1"
   local freed=0
+
+  log "Freeing ${need_to_free} bytes of space for snapshot."
   # Remove all RecentClips before removing any Saved or Sentry Clips.
   for path in /backingfiles/TeslaCam/RecentClips /backingfiles/TeslaCam
   do
-    if [ $freed -lt $need_to_free ]
+    if [ $freed -lt "$need_to_free" ]
     then
-      while IFS= read -r -d '' file
+      while IFS= read -r file
       do
-        local size=$(eval $(stat --format='echo $((%b*%B))' "${file}"))
+        local size
+        # shellcheck disable=SC2046
+        size=$(eval $(stat --format="echo \$((%b*%B))" "${file}"))
         if rm -f "${file}"
         then
-          let freed=freed+size
-          if [ $need_to_free -lt $freed ]
+          (( freed+=size ))
+          if [ "$need_to_free" -lt $freed ]
           then
             return 0
           fi
@@ -107,37 +110,50 @@ function free_space {
 }
 
 function snapshot {
+  local imgsize
+  local freespace
+  local fssize
+  local tenpercentminfree
+  local wanted
+  local freespace
   # Only take a snapshot if the remaining free space is greater than
   # the size of the cam disk image. Delete older snapshots if necessary
   # to achieve that.
   # todo: this could be put in a background task and with a lower free
   # space requirement, to delete old snapshots just before running out
   # of space and thus make better use of space
-  local imgsize=$(eval $(stat --format='echo $((%b*%B))' /backingfiles/cam_disk.bin))
-  local freespace=$(eval $(stat --file-system --format='echo $((%f*%S))' /backingfiles/cam_disk.bin))
-  local fssize=$(eval $(stat --file-system --format='echo $((%b*%S))' /backingfiles/cam_disk.bin))
-  local tenpercentminfree=$(( fssize/ 10 ))
-  local wanted=$imgsize
-  if [ $imgsize -lt tenpercentminfree ]
+  # shellcheck disable=SC2046
+  imgsize=$(eval $(stat --format="echo \$((%b*%B))" /backingfiles/cam_disk.bin))
+  # shellcheck disable=SC2046
+  freespace=$(eval $(stat --file-system --format="echo \$((%f*%S))" /backingfiles/cam_disk.bin))
+  # shellcheck disable=SC2046
+  fssize=$(eval $(stat --file-system --format="echo \$((%b*%S))" /backingfiles/cam_disk.bin))
+  tenpercentminfree=$(( fssize/ 10 ))
+  wanted=$imgsize
+
+  if [ "$imgsize" -lt $tenpercentminfree ]
   then
     # Free the larger (10%) of the disk.
     wanted=tenpercentminfree
   fi
-  if [ $freespace -lt $wanted ]
+  if [ "$freespace" -lt $wanted ]
   then
-    let need_to_free=wanted-freespace
+    local need_to_free=$((wanted-freespace))
     if ! free_space ${need_to_free}
     then
-      local freespace=$(eval $(stat --file-system --format='echo $((%f*%S))' /backingfiles/cam_disk.bin))
+      # shellcheck disable=SC2046
+      freespace=$(eval $(stat --file-system --format="echo \$((%f*%S))" /backingfiles/cam_disk.bin))
       log "Insufficient free space ($freespace) to take a snapshot. Want $wanted free. Aborting!"
       return 1
     fi
   fi
   
-  local snaptime=$(date "+%Y%m%dT%H%M%S")
-  local snapdir=/backingfiles/snapshots/snap-${snaptime}
-  local snapmnt=$snapdir/mnt
-  local name=$snapdir/snap.bin
+  local snaptime
+  snaptime=$(date "+%Y%m%dT%H%M%S")
+
+  local snapdir="/backingfiles/snapshots/snap-${snaptime}"
+  local snapmnt="$snapdir/mnt"
+  local name="$snapdir/snap.bin"
   rm -rf "$snapdir"
   log "Taking snapshot of cam disk: $name"
   /root/bin/mount_snapshot.sh /backingfiles/cam_disk.bin "$name" "$snapmnt"

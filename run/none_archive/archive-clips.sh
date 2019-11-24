@@ -2,7 +2,7 @@
 
 # Copies or moves files by magic!
 
-script=$(basename $0)
+script=$(basename "$0")
 function usage() {
   echo "usage: $script [-m|-c] -s <source> -p <path>" >&2
   echo "        -m, -c: Do a [m]ove or [c]opy of the files." >&2
@@ -15,26 +15,31 @@ function usage() {
 src=""
 extpath=""
 op="Copy"
-op_future="Copying"
-op_past="Copied"
-cmd=""
-while getopts 's:p:m' OPTION; do
+#op_future="Copying"
+#op_past="Copied"
+#cmd=""
+while getopts 's:p:mc' OPTION; do
   case "$OPTION" in
-    s) src="$OPTARG" ;;
-    p) extpath="$OPTARG" ;;
+    s) src="$OPTARG"
+       ;;
+    p) extpath="$OPTARG"
+       ;;
     m) op="Move"
-       op_future='Moving'
-       op_past="Moved"
-       cmd="--remove-source-files " ;;
+       #op_future='Moving'
+       #op_past="Moved"
+       #cmd="--remove-source-files "
+       ;;
     c) op="Copy"
-       op_future='Copying'
-       op_past="Copied"
-       cmd="" ;;
+       #op_future='Copying'
+       #op_past="Copied"
+       #cmd=""
+       ;;
     *) usage; 
-       exit 1;;
+       exit 1
+       ;;
   esac
 done
-shift "$(($OPTIND -1))"
+shift "$((OPTIND -1))"
 
 # Verify the src and extpath are set.
 if [ ! -d "$src/$extpath" ]

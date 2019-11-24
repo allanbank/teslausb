@@ -6,9 +6,9 @@ export MUSIC_MOUNT=/mnt/music
 export ARCHIVE_MOUNT=/mnt/archive
 export MUSIC_ARCHIVE_MOUNT=/mnt/musicarchive
 
-if [ "$BASH_SOURCE" != "$0" ]
+if [ "${BASH_SOURCE[0]}" != "$0" ]
 then
-  echo "$BASH_SOURCE must be executed, not sourced"
+  echo "{BASH_SOURCE[0]} must be executed, not sourced"
   return 1 # shouldn't use exit when sourced
 fi
 
@@ -55,7 +55,7 @@ function isPi4 {
 }
 function timestamp () {
   local prefix=${1:-}
-  while IFS= read line
+  while IFS= read -r line
   do
     echo "$(date): $prefix$line"
   done
@@ -84,7 +84,8 @@ function retry () {
   return
 }
 function truncate_log () {
-  local log_length=$( wc -l "$LOG_FILE" | cut -d' ' -f 1 )
+  local log_length=0
+  log_length=$( wc -l "$LOG_FILE" | cut -d' ' -f 1 )
   if [ "$log_length" -gt 10000 ]
   then
     log "Truncating log..."
@@ -95,8 +96,10 @@ function truncate_log () {
 }
 function set_time () {
   log "Waiting for time to be set by ntpd..."
+  # shellcheck disable=SC2034
   for i in {1..10}
   do
+    log "ntp-wait try $i of 10"
     if ntp-wait --tries=1 --sleep=1
     then
       log "Time now set"
@@ -225,10 +228,10 @@ function unmount_mount_point () {
 function fix_errors_in_image () {
   local image="$1"
   log "Running fsck on $image..."
-  losetup -f -P $image
-  loopback=$(losetup -j $image | awk '{print $1}' | sed 's/://')
-  /sbin/fsck ${loopback}p1 -- -a |& timestamp '| ' >> "$LOG_FILE" || echo ""
-  losetup -d $loopback
+  losetup -f -P "$image"
+  loopback=$(losetup -j "$image" | awk '{print $1}' | sed 's/://')
+  /sbin/fsck "${loopback}p1" -- -a |& timestamp '| ' >> "$LOG_FILE" || echo ""
+  losetup -d "$loopback"
   log "Finished fsck on $image."
 }
 function fix_errors_in_files () {
@@ -246,10 +249,10 @@ function trim_free_space() {
   then
     loop=$(echo "$found" | awk '{print $2}')
     image=$(losetup -l -n --output=BACK-FILE "$loop")
-    log "Trimming free space in $mount_point, which has $(xfs_bmap $image | wc -l) extents"
+    log "Trimming free space in $mount_point, which has $(xfs_bmap "$image" | wc -l) extents"
     if fstrim "$mount_point" >> "$LOG_FILE" 2>&1
     then
-      log "Trim complete, image now has  $(xfs_bmap $image | wc -l) extents"
+      log "Trim complete, image now has  $(xfs_bmap "$image" | wc -l) extents"
     else
       log "Trimming free space in $mount_point failed."
     fi
@@ -307,7 +310,17 @@ function disconnect_usb_drives_from_host () {
   log "Disconnected usb from host."
 }
 function check_if_usb_drives_is_mounted () {
-    if [ ! -d /sys/devices/platform/soc/??980000.usb/gadget/lun0 ]
+    local found="false"
+    for lun in /sys/devices/platform/soc/??980000.usb/gadget/lun0
+    do
+      if [ -d "$lun" ]
+      then
+        found="true"
+        break
+      fi
+    done
+
+    if [ "$found" = "false" ]
     then
         log "USB Gadget not mounted. Fixing files and remounting..."
         disconnect_usb_drives_from_host
@@ -334,7 +347,7 @@ function archive_is_reachable () {
 }
 function wait_for_archive_to_be_reachable () {
   log "Waiting for archive to be reachable..."
-  while [ true ]
+  while true
   do
     if archive_is_reachable
     then
@@ -352,7 +365,7 @@ function wait_for_archive_to_be_reachable () {
 }
 function wait_for_archive_to_be_unreachable () {
   log "Waiting for archive to be unreachable..."
-  while [ true ]
+  while true
     do
       if ! retry archive_is_reachable
       then
@@ -423,16 +436,16 @@ then
     fi
 
     local destfile="${destdir}/${filename}"
-    if [ ! -e "${destfile}" -o "${file}" -nt "${destfile}" ]
+    if [ ! -e "${destfile}" ] || [ "${file}" -nt "${destfile}" ]
     then
       log "Moving ${group}/.../${filename}"
       # Set the copy to not interfere with the Tesla's I/O
       ionice -t -c 3 rm -f "${destdir}/_${filename}"
-      ionice -t -c 3 cp --preserve=timestamps ${file} "${destdir}/_${filename}"
+      ionice -t -c 3 cp --preserve=timestamps "${file}" "${destdir}/_${filename}"
       mv "${destdir}/_${filename}" "${destfile}"
     else
       log "Removing ${group}/.../${filename} - Already copied."
-      rm ${file}
+      rm "${file}"
     fi
   }
   function mv_from_image {
@@ -497,6 +510,8 @@ then
     local now=0
     local wakeup=0
     local inactivecount=0
+    local prefilecount=0
+    local postfilecount=0
 
     cleanup_snapshots
 
@@ -518,10 +533,10 @@ then
       printf -v now '%(%s)T' -1
       wakeup=$((now+interval))
 
-      local prefilecount=$( find /backingfiles/TeslaCam -type f | wc -l )
+      prefilecount=$( find /backingfiles/TeslaCam -type f | wc -l )
       log "SNAP: Periodic snapshot started."
       /root/bin/make_snapshot.sh
-      local postfilecount=$( find /backingfiles/TeslaCam -type f | wc -l )
+      postfilecount=$( find /backingfiles/TeslaCam -type f | wc -l )
 
       if [ "${prefilecount}" = "${postfilecount}" ]
       then
@@ -615,7 +630,7 @@ else
   
     log "There are $DIR_COUNT event folder(s) with $FILE_COUNT file(s) to move."
 
-    if [ $DIR_COUNT -gt 0 ]
+    if [ "$DIR_COUNT" -gt 0 ]
     then
         log "Starting recording archiving: $DIR_COUNT event folder(s) with $FILE_COUNT file(s)"
 
@@ -714,7 +729,7 @@ log "Starting archiveloop..."
 
 snapshotloop &
 
-mount_and_fix_errors_in_files
+fix_errors_in_files
 
 if archive_is_reachable
 then
@@ -738,7 +753,7 @@ else
   connect_usb_drives_to_host
 fi
 
-while [ true ]
+while true
 do
   slowblink
 
@@ -747,7 +762,7 @@ do
   # Start the archive loop.
   fastblink
   set_time
-  sleep ${ARCHIVE_DELAY:-20}
+  sleep "${ARCHIVE_DELAY:-20}"
 
   archive_clips
   truncate_log

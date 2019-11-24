@@ -2,7 +2,7 @@
 
 # Copies or moves files to the $ARCHIVE_MOUNT via cp/mv.
 
-script=$(basename $0)
+script=$(basename "$0")
 function usage() {
   echo "usage: $script [-m|-c] -s <source> -p <path>" >&2
   echo "        -m, -c: Do a [m]ove or [c]opy of the files." >&2
@@ -17,21 +17,26 @@ extpath=""
 op="Copy"
 op_future="Copying"
 op_past="Copied"
-while getopts 's:p:m' OPTION; do
+while getopts 's:p:mc' OPTION; do
   case "$OPTION" in
-    s) src="$OPTARG" ;;
-    p) extpath="$OPTARG" ;;
+    s) src="$OPTARG"
+       ;;
+    p) extpath="$OPTARG"
+       ;;
     m) op="Move"
        op_future='Moving'
-       op_past="Moved" ;;
+       op_past="Moved"
+       ;;
     c) op="Copy"
        op_future='Copying'
-       op_past="Copied" ;;
+       op_past="Copied"
+       ;;
     *) usage; 
-       exit 1;;
+       exit 1
+       ;;
   esac
 done
-shift "$(($OPTIND -1))"
+shift "$((OPTIND -1))"
 
 # Verify the src and extpath are set.
 if [ ! -d "${src}/${extpath}" ]
@@ -43,9 +48,10 @@ fi
 function connectionmonitor {
   while true
   do
+    # shellcheck disable=SC2034
     for i in {1..5}
     do
-      if timeout 6 /root/bin/archive-is-reachable.sh $ARCHIVE_HOST_NAME
+      if timeout 6 /root/bin/archive-is-reachable.sh "$ARCHIVE_HOST_NAME"
       then
         # sleep and then continue outer loop
         sleep 5
@@ -55,7 +61,7 @@ function connectionmonitor {
     log "Connection dead, killing ${script}"
     # The archive loop might be stuck on an unresponsive server, so kill it hard.
     # (should be no worse than losing power in the middle of an operation)
-    kill -9 $1
+    kill -9 "$1"
     return
   done
 }
@@ -82,7 +88,7 @@ function processclips() {
       filename=$(basename "${file}")
       destdir="$ARCHIVE_MOUNT/${extpath}/${relpath}"
       destfile="${destdir}/${filename}"
-      if [ ! -e "${destfile}" -o "${base}/${file}" -nt "${destfile}" ]
+      if [ ! -e "${destfile}" ] || [ "${base}/${file}" -nt "${destfile}" ]
       then 
         log "${op_future} '${extpath}/${file}'"
         mkdir --parents "${destdir}"
@@ -111,7 +117,7 @@ function processclips() {
         fi
       fi
     fi
-  done < <( find ${base} -type f -printf "%P\0" )
+  done < <( find "${base}" -type f -printf "%P\0" )
 
   log "${op_past} $NUM_FILES_OPS file(s), ${op_future} $NUM_FILES_FAILED failed."
   if [ $NUM_FILES_OPS -gt 0 ]

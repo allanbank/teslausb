@@ -14,9 +14,10 @@ DST="/mnt/music"
 function connectionmonitor {
   while true
   do
+    # shellcheck disable=SC2034
     for i in {1..10}
     do
-      if timeout 3 /root/bin/archive-is-reachable.sh $ARCHIVE_HOST_NAME
+      if timeout 3 /root/bin/archive-is-reachable.sh "$ARCHIVE_HOST_NAME"
       then
         # sleep and then continue outer loop
         sleep 5
@@ -26,7 +27,7 @@ function connectionmonitor {
     log "connection dead, killing archive-clips"
     # The archive loop might be stuck on an unresponsive server, so kill it hard.
     # (should be no worse than losing power in the middle of an operation)
-    kill -9 $1
+    kill -9 "$1"
     return
   done
 }
@@ -41,7 +42,7 @@ connectionmonitor $$ &
 
 # Delete files from the local partition(DST) files that do not exist in the 
 # music archive(SRC). This frees space for the new files that may be added.
-while read file_name
+while read -r file_name
 do
   if [ ! -e "$SRC/$file_name" ]
   then
@@ -53,10 +54,10 @@ do
       NUM_FILES_DELETE_ERROR=$((NUM_FILES_DELETE_ERROR + 1))
     fi
   fi
-done <<< "$(cd "$DST"; find * -type f)"
+done <<< "$(cd "$DST"; find ./* -type f)"
 
 # Copy from the music archive(SRC) to the local parition(DST)
-while read file_name
+while read -r file_name
 do
   if [ ! -e "$DST/$file_name" ]
   then
@@ -83,7 +84,7 @@ do
   else
     NUM_FILES_SKIPPED=$((NUM_FILES_SKIPPED + 1))
   fi
-done <<< "$(cd "$SRC"; find * -type f)"
+done <<< "$(cd "$SRC"; find ./* -type f)"
 
 # Stop the connection monitor.
 kill %1
