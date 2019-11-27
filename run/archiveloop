@@ -99,7 +99,6 @@ function set_time () {
   # shellcheck disable=SC2034
   for i in {1..10}
   do
-    log "ntp-wait try $i of 10"
     if ntp-wait --tries=1 --sleep=1
     then
       log "Time now set"
@@ -303,6 +302,9 @@ function connect_usb_drives_to_host() {
   log "Connecting usb to host..."
   modprobe g_mass_storage
   log "Connected usb to host."
+  # Give the file-storage process a boost in I/O priority.
+  # shellcheck disable=SC2046
+  ionice -c 2 -n 0 -p $( pgrep file-storage ) || true
 }
 function disconnect_usb_drives_from_host () {
   log "Disconnecting usb from host..."
@@ -724,12 +726,15 @@ export -f fix_errors_in_image
 echo "==============================================" >> "$LOG_FILE"
 log "Starting archiveloop..."
 
+# Let make sure the drives are in good shape.
+disconnect_usb_drives_from_host
+fix_errors_in_files
+connect_usb_drives_to_host
+
 # turning off hdmi saves a little bit of power
 /usr/bin/tvservice -o
 
 snapshotloop &
-
-fix_errors_in_files
 
 if archive_is_reachable
 then
@@ -738,7 +743,7 @@ then
   set_time
 
   archive_clips
-
+  truncate_log
   doubleblink
 
   connect_usb_drives_to_host
@@ -746,11 +751,6 @@ then
   wait_for_archive_to_be_unreachable
 else
   slowblink
-
-  # Let make sure the drives are in good shape.
-  disconnect_usb_drives_from_host
-  fix_errors_in_files
-  connect_usb_drives_to_host
 fi
 
 while true
