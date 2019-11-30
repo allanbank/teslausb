@@ -396,7 +396,10 @@ function turn_sentry_mode_on () {
     if [ "false" = "${is_sentry_mode_enabled}" ]
     then
       log "Temporarily enabling Sentry Mode to power the RPi while archive job completes..."
-      /root/bin/tesla_api.py enable_sentry_mode &>> ${LOG_FILE}
+      if ! /root/bin/tesla_api.py enable_sentry_mode &>> ${LOG_FILE}
+      then
+        log "Could not enable Sentry Mode..."
+      fi
     fi
   fi
 }
@@ -406,7 +409,10 @@ function turn_sentry_mode_off () {
 	  if [ "false" = "${is_sentry_mode_enabled}" ]
 	  then
 	    log "Restoring Sentry Mode to its previous state (disabled)..."
-      /root/bin/tesla_api.py disable_sentry_mode &>> ${LOG_FILE}
+      if ! /root/bin/tesla_api.py disable_sentry_mode &>> ${LOG_FILE}
+      then
+        log "Could not disable Sentry Mode..."
+      fi
 	  fi
 	fi
 }
