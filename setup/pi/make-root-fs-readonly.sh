@@ -37,6 +37,7 @@ log_progress "Configuring system..."
 append_cmdline_txt_param fastboot
 append_cmdline_txt_param noswap
 append_cmdline_txt_param ro
+append_cmdline_txt_param dtoverlay=sdio,poll_once
 
 # we're not using swap, so delete the swap file for some extra space
 rm -f /var/swap
