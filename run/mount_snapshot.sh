@@ -31,6 +31,9 @@ cp --reflink=always "$SRC" "$SNAP"
 # at this point we have a snapshot of the cam image, which is completely
 # independent of the still in-use image exposed to the car
 
+# Fix any errors in the image that we just made a copy of (so could not have been unmounted clean).
+fix_errors_in_image "$SNAP"
+
 # create loopback and scan the partition table, this will create an additional loop
 # device in addition to the main loop device, e.g. /dev/loop0 and /dev/loop0p1
 losetup -P -f "$SNAP"

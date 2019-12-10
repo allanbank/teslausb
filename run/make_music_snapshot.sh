@@ -49,7 +49,8 @@ function snapshot {
   /root/bin/mount_snapshot.sh /backingfiles/music_disk.bin "$name" "$MUSIC_MOUNT"
   log "Took music snapshot"
 
-  fix_errors_in_image "$name"
+  # Have to mount the file read/write since mount_snapshot mounts read-only.
+  mount "$MUSIC_MOUNT" -o remount,rw
 
   return 0
 }

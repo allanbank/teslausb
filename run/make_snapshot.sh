@@ -217,12 +217,15 @@ function snapshot {
   /root/bin/mount_snapshot.sh /backingfiles/cam_disk.bin "$name" "$snapmnt"
   log "Took snapshot"
 
-  fix_errors_in_image "$name"
   copy_files_for_snapshot "$snapmnt"
 
   log "Discarding Snapshot"
   /root/bin/release_snapshot.sh "$snapmnt"
   rm -rf "$snapdir"
+
+  # Make sure the backing device knows about any freed space
+  fstrim /backingfiles || true
+
   return 0
 }
 
