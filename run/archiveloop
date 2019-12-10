@@ -499,7 +499,17 @@ then
     /root/bin/archive-clips.sh -m -s "/backingfiles/TeslaCam" -p SavedClips
     if [ "${ARCHIVE_RECENT_CLIPS:-false}" = "true" ]
     then
+      if [ "${ENABLE_CAM_AND_MUSIC_DRIVES_DURING_RECENT_ARCHIVE:-false}" != "true" ]
+      then
+         disconnect_usb_drives_from_host
+      fi
+
       /root/bin/archive-clips.sh -m -s "/backingfiles/TeslaCam" -p RecentClips
+
+      if [ "${ENABLE_CAM_AND_MUSIC_DRIVES_DURING_RECENT_ARCHIVE:-false}" != "true" ]
+      then
+         connect_usb_drives_to_host
+      fi
     fi
 
     # Remove empty directories.

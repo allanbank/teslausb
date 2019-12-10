@@ -65,6 +65,10 @@ export HEADLESS_SETUP=true
 # Defaults to false.
 # This requires SNAPSHOTS_ENABLED to be true (default).
 #export ARCHIVE_RECENT_CLIPS=true
+# If archiving recent clips by default the cam disk and music disk will not be exposed to the car
+# to prevent more cam files getting created while copying the files off RPi. Enable this option to
+# leave the drives exposed to the car.
+#expost ENABLE_CAM_AND_MUSIC_DRIVES_DURING_RECENT_ARCHIVE=true
 
 # uncomment to enable teslausb to act as a wifi access point with the given
 # SSID, so you can access it while on the road.

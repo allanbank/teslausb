@@ -355,6 +355,7 @@ configFile=/root/teslausb.conf
   echo "ARCHIVE_DELAY=${archivedelay:-20}"
   echo "SNAPSHOTS_ENABLED=${SNAPSHOTS_ENABLED:-true}"
   echo "ARCHIVE_RECENT_CLIPS=${ARCHIVE_RECENT_CLIPS:-false}"
+  echo "ENABLE_CAM_AND_MUSIC_DRIVES_DURING_RECENT_ARCHIVE=${ENABLE_CAM_AND_MUSIC_DRIVES_DURING_RECENT_ARCHIVE:-false}"
 } > $configFile
 
 archive_module="$(get_archive_module)"
