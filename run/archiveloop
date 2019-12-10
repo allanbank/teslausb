@@ -90,8 +90,8 @@ function truncate_log () {
   then
     log "Truncating log..."
     local log_file2="${LOG_FILE}.2"
-    tail -n 10000 "$LOG_FILE" > "${LOG_FILE}.2"
-	mv "$log_file2" "$LOG_FILE"
+    tail -n 10000 "$LOG_FILE" > "${log_file2}"
+	  mv "$log_file2" "$LOG_FILE"
   fi
 }
 function set_time () {
@@ -504,6 +504,9 @@ then
 
     # Remove empty directories.
     find /backingfiles/TeslaCam -mindepth 2 -depth -type d -empty -exec rmdir "{}" \;
+
+    # Mark the free space for the /backingfiles.
+    fstrim /backingfiles || true
   }
   function cleanup_snapshots {
     while IFS= read -r -d '' snapdir
@@ -657,6 +660,9 @@ else
     # Trim the camera archive to reduce the number of blocks in the snapshot.
     trim_free_space "$CAM_MOUNT"
 
+    # Mark the free space for the /backingfiles.
+    fstrim /backingfiles || true
+
     unmount_cam_file
     connect_usb_drives_to_host
   }
@@ -728,6 +734,7 @@ export -f retry
 export -f ensure_mountpoint_is_mounted_with_retry
 export -f log
 export -f fix_errors_in_image
+export -f timestamp
 
 echo "==============================================" >> "$LOG_FILE"
 log "Starting archiveloop..."
@@ -739,6 +746,9 @@ connect_usb_drives_to_host
 
 # turning off hdmi saves a little bit of power
 /usr/bin/tvservice -o
+
+# Mark the free space for the /backingfiles.
+fstrim /backingfiles || true
 
 snapshotloop &
 
