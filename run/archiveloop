@@ -377,32 +377,49 @@ function wait_for_archive_to_be_unreachable () {
 # Functions to turn sentry mode on and off.
 # Uses the global 'is_sentry_mode_enabled'
 declare is_sentry_mode_enabled
+
 function turn_sentry_mode_on () {
+  shopt -q -o pipefail
+  local resetpipefail=$?
+  set -o pipefail
+
   if [ -x /root/bin/tesla_api.py ]
   then
     is_sentry_mode_enabled=$(/root/bin/tesla_api.py is_sentry_mode_enabled | tr '[:upper:]' '[:lower:]')
     if [ "false" = "${is_sentry_mode_enabled}" ]
     then
       log "Temporarily enabling Sentry Mode to power the RPi while archive job completes..."
-      if ! /root/bin/tesla_api.py enable_sentry_mode &>> ${LOG_FILE}
+      if ! /root/bin/tesla_api.py enable_sentry_mode |& timestamp '| ' >>  ${LOG_FILE}
       then
         log "Could not enable Sentry Mode..."
       fi
     fi
   fi
+  if [ "$resetpipefail" -eq 1 ]
+  then
+    set +o pipefail
+  fi
 }
 function turn_sentry_mode_off () {
+  shopt -q -o pipefail
+  local resetpipefail=$?
+  set -o pipefail
+
   if [ -x /root/bin/tesla_api.py ]
   then
 	  if [ "false" = "${is_sentry_mode_enabled}" ]
 	  then
 	    log "Restoring Sentry Mode to its previous state (disabled)..."
-      if ! /root/bin/tesla_api.py disable_sentry_mode &>> ${LOG_FILE}
+      if ! /root/bin/tesla_api.py disable_sentry_mode |& timestamp '| ' >> ${LOG_FILE}
       then
         log "Could not disable Sentry Mode..."
       fi
 	  fi
 	fi
+  if [ "$resetpipefail" -eq 1 ]
+  then
+    set +o pipefail
+  fi
 }
 
 if [ "${SNAPSHOTS_ENABLED:-true}" = "true" ]
