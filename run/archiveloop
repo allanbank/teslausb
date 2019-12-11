@@ -196,18 +196,6 @@ function ensure_mountpoint_is_mounted_with_retry () {
   retry ensure_mountpoint_is_mounted "$1"
 }
 
-function ensure_cam_file_is_mounted () {
-  log "Ensuring cam file is mounted..."
-  ensure_mountpoint_is_mounted_with_retry "$CAM_MOUNT"
-  log "Ensured cam file is mounted."
-}
-
-function ensure_music_file_is_mounted () {
-  log "Ensuring music backing file is mounted..."
-  ensure_mountpoint_is_mounted_with_retry "$MUSIC_MOUNT"
-  log "Ensured music drive is mounted."
-}
-
 function unmount_mount_point () {
   local mount_point="$1"
   log "Unmounting $mount_point..."
@@ -479,13 +467,22 @@ then
     # Detach from the car so we own the drive.
     disconnect_usb_drives_from_host
 
-    # mount, fsck $CAM_MOUNT
+    # fsck and mount $CAM_MOUNT
+    fix_errors_in_image /backingfiles/cam_disk.bin
     ensure_cam_file_is_mounted
 
     # Copy the files out locally. This will remove the files and because of the
     # snapshot above should be largely just deleting files.
     mv_from_image "$CAM_MOUNT"
-    find $CAM_MOUNT/TeslaCam/ -mindepth 2 -depth -type d -empty -exec rmdir "{}" \;
+
+    # Remove any files recovered as part of the FSCK.
+    find "${CAM_MOUNT}" -name "fsck*.rec" -delete
+
+    # Remove empty directories.
+    find ${CAM_MOUNT}/TeslaCam/ -mindepth 2 -depth -type d -empty -exec rmdir "{}" \;
+
+    log "Camera Drive contents after video file removal:"
+    find "${CAM_MOUNT}" -prinf "%10s - %P\n" |& timestamp '| ' >> "$LOG_FILE" || true
 
     # Trim the camera archive to reduce the number of blocks in the snapshot.
     trim_free_space "$CAM_MOUNT"
@@ -645,10 +642,10 @@ else
     log "Checking saved folder count..."
 
     ensure_cam_file_is_mounted
-  
+
     DIR_COUNT=$(cd "$CAM_MOUNT"/TeslaCam && find . -maxdepth 2 -path './SavedClips/*' -type d -o -path './SentryClips/*' -type d | wc -l)
     FILE_COUNT=$(cd "$CAM_MOUNT"/TeslaCam && find . -maxdepth 3 -path './SavedClips/*' -type f -o -path './SentryClips/*' -type f | wc -l)
-  
+
     log "There are $DIR_COUNT event folder(s) with $FILE_COUNT file(s) to move."
 
     if [ "$DIR_COUNT" -gt 0 ]
