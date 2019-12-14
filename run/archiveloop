@@ -375,8 +375,12 @@ function wait_for_archive_to_be_unreachable () {
 declare is_sentry_mode_enabled
 
 function turn_sentry_mode_on () {
-  shopt -q -o pipefail
-  local resetpipefail=$?
+  if shopt -q -o pipefail
+  then
+    local resetpipefail=0
+  else
+    local resetpipefail=1
+  fi
   set -o pipefail
 
   if [ -x /root/bin/tesla_api.py ]
@@ -397,8 +401,12 @@ function turn_sentry_mode_on () {
   fi
 }
 function turn_sentry_mode_off () {
-  shopt -q -o pipefail
-  local resetpipefail=$?
+  if shopt -q -o pipefail
+  then
+    local resetpipefail=0
+  else
+    local resetpipefail=1
+  fi
   set -o pipefail
 
   if [ -x /root/bin/tesla_api.py ]
@@ -450,7 +458,7 @@ then
       log "Moving ${group}/.../${filename}"
       # Set the copy to not interfere with the Tesla's I/O
       ionice -t -c 3 rm -f "${destdir}/_${filename}"
-      ionice -t -c 3 cp --preserve=timestamps "${file}" "${destdir}/_${filename}"
+      ionice -t -c 3 mv --force "${file}" "${destdir}/_${filename}"
       mv "${destdir}/_${filename}" "${destfile}"
     else
       log "Removing ${group}/.../${filename} - Already copied."
@@ -495,7 +503,7 @@ then
     find ${CAM_MOUNT}/TeslaCam/ -mindepth 2 -depth -type d -empty -exec rmdir "{}" \;
 
     log "Camera Drive contents after video file removal:"
-    find "${CAM_MOUNT}" -prinf "%10s - %P\n" |& timestamp '| ' >> "$LOG_FILE" || true
+    find "${CAM_MOUNT}" -printf "%10s - %P\n" |& timestamp '| ' >> "$LOG_FILE" || true
 
     # Trim the camera archive to reduce the number of blocks in the snapshot.
     trim_free_space "$CAM_MOUNT"
