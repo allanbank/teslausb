@@ -8,6 +8,7 @@ FILE_COUNT=$(cd "$CAM_MOUNT"/TeslaCam && find . -maxdepth 3 -path './SavedClips/
 
 if [ -d "$CAM_MOUNT"/TeslaCam/SavedClips ]
 then
+  # shellcheck disable=SC2154
   rclone --config /root/.config/rclone/rclone.conf move "$CAM_MOUNT"/TeslaCam/SavedClips "$drive:$path"/SavedClips/ --create-empty-src-dirs --delete-empty-src-dirs >> "$LOG_FILE" 2>&1 || echo ""
 fi
 

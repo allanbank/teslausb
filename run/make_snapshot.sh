@@ -1,8 +1,8 @@
 #!/bin/bash -eu
 
-if [ "$BASH_SOURCE" != "$0" ]
+if [ "${BASH_SOURCE[0]}" != "$0" ]
 then
-  echo "$BASH_SOURCE must be executed, not sourced"
+  echo "${BASH_SOURCE[0]} must be executed, not sourced"
   return 1 # shouldn't use exit when sourced
 fi
 
@@ -30,11 +30,11 @@ function linksnapshotfiletorecents {
 
   filename=${file##/*/}
   filedate=${filename:0:10}
-  if [ ! -d $recents/$filedate ]
+  if [ ! -d "$recents/$filedate" ]
   then
-    mkdir -p $recents/$filedate
+    mkdir -p "$recents/$filedate"
   fi
-  ln -sf ${file/"$curmnt"/$finalmnt} $recents/$filedate
+  ln -sf "${file/"$curmnt"/$finalmnt}" "$recents/$filedate"
 }
 
 function make_links_for_snapshot {
@@ -51,39 +51,40 @@ function make_links_for_snapshot {
   local curmnt="$1"
   local finalmnt="$2"
   log "making links for $curmnt, retargeted to $finalmnt"
-  local restore_nullglob=$(shopt -p nullglob)
+  local restore_nullglob
+  restore_nullglob=$(shopt -p nullglob)
   shopt -s nullglob
-  for f in $curmnt/TeslaCam/RecentClips/*
+  for f in "$curmnt/TeslaCam/RecentClips/"*
   do
     #log "linking $f"
-    linksnapshotfiletorecents $f $curmnt $finalmnt
+    linksnapshotfiletorecents "$f" "$curmnt" "$finalmnt"
   done
   # also link in any files that were moved to SavedClips
-  for f in $curmnt/TeslaCam/SavedClips/*/*
+  for f in "$curmnt/TeslaCam/SavedClips"/*/*
   do
     #log "linking $f"
-    linksnapshotfiletorecents $f $curmnt $finalmnt
+    linksnapshotfiletorecents "$f" "$curmnt" "$finalmnt"
     # also link it into a SavedClips folder
     local eventfolder=${f%/*}
     local eventtime=${eventfolder##/*/}
-    if [ ! -d $saved/$eventtime ]
+    if [ ! -d "$saved/$eventtime" ]
     then
-      mkdir -p $saved/$eventtime
+      mkdir -p "$saved/$eventtime"
     fi
-    ln -sf ${f/"$curmnt"/$finalmnt} $saved/$eventtime
+    ln -sf "${f/$curmnt/$finalmnt}" "$saved/$eventtime"
   done
   # and the same for SentryClips
-  for f in $curmnt/TeslaCam/SentryClips/*/*
+  for f in "$curmnt/TeslaCam/SentryClips/"*/*
   do
     #log "linking $f"
-    linksnapshotfiletorecents $f $curmnt $finalmnt
+    linksnapshotfiletorecents "$f" "$curmnt" "$finalmnt"
     local eventfolder=${f%/*}
     local eventtime=${eventfolder##/*/}
-    if [ ! -d $sentry/$eventtime ]
+    if [ ! -d "$sentry/$eventtime" ]
     then
-      mkdir -p $sentry/$eventtime
+      mkdir -p "$sentry/$eventtime"
     fi
-    ln -sf ${f/"$curmnt"/$finalmnt} $sentry/$eventtime
+    ln -sf "${f/$curmnt/$finalmnt}" "$sentry/$eventtime"
   done
   log "made all links for $curmnt"
   $restore_nullglob
@@ -96,11 +97,15 @@ function snapshot {
   # todo: this could be put in a background task and with a lower free
   # space requirement, to delete old snapshots just before running out
   # of space and thus make better use of space
-  local imgsize=$(eval $(stat --format='echo $((%b*%B))' /backingfiles/cam_disk.bin))
+  local imgsize
+  # shellcheck disable=SC2046
+  imgsize=$(eval $(stat --format="echo \$((%b*%B))" /backingfiles/cam_disk.bin))
   while true
   do
-    local freespace=$(eval $(stat --file-system --format='echo $((%f*%S))' /backingfiles/cam_disk.bin))
-    if [ $freespace -gt $imgsize ]
+    local freespace
+    # shellcheck disable=SC2046
+    freespace=$(eval $(stat --file-system --format="echo \$((%f*%S))" /backingfiles/cam_disk.bin))
+    if [ "$freespace" -gt "$imgsize" ]
     then
       break
     fi
@@ -109,6 +114,7 @@ function snapshot {
       log "warning: low space for snapshots"
       break
     fi
+    # shellcheck disable=SC2012
     oldest=$(ls -ldC1 /backingfiles/snapshots/snap-* | head -1)
     log "low space, deleting $oldest"
     /root/bin/release_snapshot.sh "$oldest/mnt"
@@ -119,11 +125,15 @@ function snapshot {
   local newnum=0
   if stat /backingfiles/snapshots/snap-*/snap.bin > /dev/null 2>&1
   then
+    # shellcheck disable=SC2012
     oldnum=$(ls -lC1 /backingfiles/snapshots/snap-*/snap.bin | tail -1 | tr -c -d '[:digit:]' | sed 's/^0*//' )
     newnum=$((oldnum + 1))
   fi
-  local oldname=/backingfiles/snapshots/snap-$(printf "%06d" $oldnum)/snap.bin
-  local newsnapdir=/backingfiles/snapshots/snap-$(printf "%06d" $newnum)
+  local oldname
+  local newsnapdir
+  oldname=/backingfiles/snapshots/snap-$(printf "%06d" "$oldnum")/snap.bin
+  newsnapdir=/backingfiles/snapshots/snap-$(printf "%06d" $newnum)
+
   local newname=$newsnapdir/snap.bin
   local tmpsnapdir=/backingfiles/snapshots/newsnap
   local tmpsnapname=$tmpsnapdir/snap.bin

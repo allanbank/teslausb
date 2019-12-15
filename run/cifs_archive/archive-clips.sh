@@ -9,9 +9,10 @@ NUM_FILES_DELETED=0
 function connectionmonitor {
   while true
   do
+    # shellcheck disable=SC2034
     for i in {1..5}
     do
-      if timeout 6 /root/bin/archive-is-reachable.sh $ARCHIVE_HOST_NAME
+      if timeout 6 /root/bin/archive-is-reachable.sh "$ARCHIVE_HOST_NAME"
       then
         # sleep and then continue outer loop
         sleep 5
@@ -21,15 +22,14 @@ function connectionmonitor {
     log "connection dead, killing archive-clips"
     # The archive loop might be stuck on an unresponsive server, so kill it hard.
     # (should be no worse than losing power in the middle of an operation)
-    kill -9 $1
+    kill -9 "$1"
     return
   done
 }
 
 function moveclips() {
   ROOT="$1"
-  PATTERN="$2"
-  SUB=$(basename $ROOT)
+  SUB=$(basename "$ROOT")
 
   if [ ! -d "$ROOT" ]
   then
@@ -37,7 +37,7 @@ function moveclips() {
     return
   fi
 
-  while read file_name
+  while IFS= read -r -d '' file_name
   do
     if [ -d "$ROOT/$file_name" ]
     then
@@ -50,7 +50,7 @@ function moveclips() {
     elif [ -f "$ROOT/$file_name" ]
     then
       size=$(stat -c%s "$ROOT/$file_name")
-      if [ $size -lt 100000 ]
+      if [ "$size" -lt 100000 ]
       then
         log "'$SUB/$file_name' is only $size bytes"
         rm "$ROOT/$file_name"
@@ -70,16 +70,16 @@ function moveclips() {
     else
       log "$SUB/$file_name not found"
     fi
-  done <<< $(cd "$ROOT"; find $PATTERN)
+  done < <( find "$ROOT" -type f -printf "%P\0" )
 }
 
 connectionmonitor $$ &
 
 # new file name pattern, firmware 2019.*
-moveclips "$CAM_MOUNT/TeslaCam/SavedClips" '*'
+moveclips "$CAM_MOUNT/TeslaCam/SavedClips"
 
 # v10 firmware adds a SentryClips folder
-moveclips "$CAM_MOUNT/TeslaCam/SentryClips" '*'
+moveclips "$CAM_MOUNT/TeslaCam/SentryClips"
 
 kill %1
 

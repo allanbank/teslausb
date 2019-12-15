@@ -13,11 +13,12 @@ function send_pushover () {
 
   source /root/.teslaCamPushoverCredentials
 
+  # shellcheck disable=SC2154
   curl -F "token=$pushover_app_key" \
-  -F "user=$pushover_user_key" \
-  -F "title=$TITLE" \
-  -F "message=$MESSAGE" \
-  https://api.pushover.net/1/messages
+    -F "user=$pushover_user_key" \
+    -F "title=$TITLE" \
+    -F "message=$MESSAGE" \
+    https://api.pushover.net/1/messages
 }
 
 function send_gotify () {
@@ -25,11 +26,12 @@ function send_gotify () {
 
   source /root/.teslaCamGotifySettings
 
+  # shellcheck disable=SC2154
   curl -X POST \
-  -F "title=$TITLE" \
-  -F "message=$MESSAGE" \
-  -F "priority=$gotify_priority" \
-  "$gotify_domain/message?token=$gotify_app_token"
+    -F "title=$TITLE" \
+    -F "message=$MESSAGE" \
+    -F "priority=$gotify_priority" \
+    "$gotify_domain/message?token=$gotify_app_token"
 }
 
 function send_ifttt () {
@@ -37,10 +39,11 @@ function send_ifttt () {
 
   source /root/.teslaCamIftttSettings
 
+  # shellcheck disable=SC2154
   curl -X POST \
-  -F "value1=$TITLE" \
-  -F "value2=$MESSAGE" \
-  "https://maker.ifttt.com/trigger/$ifttt_event_name/with/key/$ifttt_key"
+    -F "value1=$TITLE" \
+    -F "value2=$MESSAGE" \
+    "https://maker.ifttt.com/trigger/$ifttt_event_name/with/key/$ifttt_key"
 }
 
 function send_sns () {
@@ -48,7 +51,8 @@ function send_sns () {
 
   source /root/.teslaCamSNSTopicARN
 
-  python3 /root/bin/send_sns.py -t $sns_topic_arn -s "$TITLE" -m "$MESSAGE"
+  # shellcheck disable=SC2154
+  python3 /root/bin/send_sns.py -t "$sns_topic_arn" -s "$TITLE" -m "$MESSAGE"
 }
 
 [ -r "/root/.teslaCamPushoverCredentials" ] && send_pushover

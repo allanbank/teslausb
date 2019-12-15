@@ -3,11 +3,11 @@
 function setup_progress () {
   local setup_logfile=/boot/teslausb-headless-setup.log
   local headless_setup=${HEADLESS_SETUP:-false}
-  if [ $headless_setup = "true" ]
+  if [ "$headless_setup" = "true" ]
   then
     echo "$( date ) : $1" >> "$setup_logfile"
   fi
-  echo $1
+  echo "$1"
 }
 
 # install XFS tools if needed
@@ -17,17 +17,18 @@ then
 fi
 
 # Will check for USB Drive before running sd card
-if [ ! -z "$usb_drive" ]
+# shellcheck disable=SC2154
+if [ -n "$usb_drive" ]
 then
   setup_progress "usb_drive is set to $usb_drive"
   # Check if backingfiles and mutable partitions exist
-  if [ /dev/disk/by-label/backingfiles -ef /dev/sda2 -a /dev/disk/by-label/mutable -ef /dev/sda1 ]
+  if [ /dev/disk/by-label/backingfiles -ef /dev/sda2 ] && [ /dev/disk/by-label/mutable -ef /dev/sda1 ]
   then
     setup_progress "Looks like backingfiles and mutable partitions already exist. Skipping partition creation."
   else
     setup_progress "WARNING !!! This will delete EVERYTHING in $usb_drive."
-    wipefs -afq $usb_drive
-    parted $usb_drive --script mktable gpt
+    wipefs -afq "$usb_drive"
+    parted "$usb_drive" --script mktable gpt
     setup_progress "$usb_drive fully erased. Creating partitions..."
     parted -a optimal -m /dev/sda mkpart primary ext4 '0%' 2GB
     parted -a optimal -m /dev/sda mkpart primary ext4 2GB '100%'
@@ -61,8 +62,8 @@ fi
 
 # If partition 3 is the backingfiles partition, type xfs, and
 # partition 4 the mutable partition, type ext4, then return early.
-if [ /dev/disk/by-label/backingfiles -ef /dev/mmcblk0p3 -a \
-    /dev/disk/by-label/mutable -ef /dev/mmcblk0p4 ] && \
+if [ /dev/disk/by-label/backingfiles -ef /dev/mmcblk0p3 ] && \
+    [ /dev/disk/by-label/mutable -ef /dev/mmcblk0p4 ] && \
     blkid /dev/mmcblk0p4 | grep -q 'TYPE="ext4"'
 then
   if blkid /dev/mmcblk0p3 | grep -q 'TYPE="xfs"'
@@ -104,7 +105,7 @@ then
 fi
 
 # partition 3 and 4 either don't exist, or are the wrong type
-if [ -e /dev/mmcblk0p3 -o -e /dev/mmcblk0p4 ]
+if [ -e /dev/mmcblk0p3 ] || [ -e /dev/mmcblk0p4 ]
 then
   setup_progress "STOP: partitions already exist, but are not as expected"
   setup_progress "please delete them and re-run setup"
@@ -117,13 +118,13 @@ MUTABLE_MOUNTPOINT="$2"
 setup_progress "Checking existing partitions..."
 
 DISK_SECTORS=$(blockdev --getsz /dev/mmcblk0)
-LAST_DISK_SECTOR=$(($DISK_SECTORS-1))
+LAST_DISK_SECTOR=$((DISK_SECTORS - 1))
 # mutable partition is 100MB at the end of the disk, calculate its start sector
 FIRST_MUTABLE_SECTOR=$((LAST_DISK_SECTOR-204800+1))
 # backingfiles partition sits between the root and mutable partition, calculate its start sector and size
 LAST_ROOT_SECTOR=$(sfdisk -l /dev/mmcblk0 | grep mmcblk0p2 | awk '{print $3}')
-FIRST_BACKINGFILES_SECTOR=$((LAST_ROOT_SECTOR+1))
-BACKINGFILES_NUM_SECTORS=$((FIRST_MUTABLE_SECTOR-$FIRST_BACKINGFILES_SECTOR))
+FIRST_BACKINGFILES_SECTOR=$((LAST_ROOT_SECTOR + 1))
+BACKINGFILES_NUM_SECTORS=$((FIRST_MUTABLE_SECTOR - FIRST_BACKINGFILES_SECTOR))
 
 ORIGINAL_DISK_IDENTIFIER=$( fdisk -l /dev/mmcblk0 | grep -e "^Disk identifier" | sed "s/Disk identifier: 0x//" )
 
@@ -134,11 +135,11 @@ setup_progress "Modifying partition table for mutable (writable) partition for s
 echo "$FIRST_MUTABLE_SECTOR," | sfdisk --force /dev/mmcblk0 -N 4
 
 # manually adding the partitions to the kernel's view of things is sometimes needed
-if [ ! -e /dev/mmcblk0p3 -o ! -e /dev/mmcblk0p4 ]
+if [ ! -e /dev/mmcblk0p3 ] || [ ! -e /dev/mmcblk0p4 ]
 then
   partx --add --nr 3:4 /dev/mmcblk0
 fi
-if [ ! -e /dev/mmcblk0p3 -o ! -e /dev/mmcblk0p4 ]
+if [ ! -e /dev/mmcblk0p3 ] || [ ! -e /dev/mmcblk0p4 ]
 then
   setup_progress "failed to add partitions"
   exit 1

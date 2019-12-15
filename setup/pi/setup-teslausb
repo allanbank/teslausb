@@ -1,8 +1,8 @@
 #!/bin/bash -eu
 
-if [ "$BASH_SOURCE" != "$0" ]
+if [ "${BASH_SOURCE[0]}" != "$0" ]
 then
-  echo "$BASH_SOURCE must be executed, not sourced"
+  echo "${BASH_SOURCE[0]} must be executed, not sourced"
   return 1 # shouldn't use exit when sourced
 fi
 
@@ -22,13 +22,13 @@ then
 fi
 
 HEADLESS_SETUP=${HEADLESS_SETUP:-false}
-if [ "$HEADLESS_SETUP" = "false" -a -t 0 ]
+if [ "$HEADLESS_SETUP" = "false" ] && [ -t 0 ]
 then
   # running in terminal in non-headless mode
-  if [ -f /boot/teslausb_setup_variables.conf -o -f /root/teslausb_setup_variables.conf ]
+  if [ -f /boot/teslausb_setup_variables.conf ] || [ -f /root/teslausb_setup_variables.conf ]
   then
     # headless setup variables are available
-    read -p "Read setup info from teslausb_setup_variables.conf (yes/no/cancel)? " answer
+    read -r -p "Read setup info from teslausb_setup_variables.conf (yes/no/cancel)? " answer
     case ${answer:0:1} in
       y|Y )
           HEADLESS_SETUP=true
@@ -58,13 +58,14 @@ export usb_drive=${usb_drive:-''}
 
 function setup_progress () {
   local setup_logfile=/boot/teslausb-headless-setup.log
-  if [ $HEADLESS_SETUP = "true" -a -w $setup_logfile ]
+  if [ $HEADLESS_SETUP = "true" ] && [ -w $setup_logfile ]
   then
-    echo "$( date ) : $@" >> "$setup_logfile"
+    echo "$( date ) : $*" >> "$setup_logfile"
   fi
   echo "$@"
 }
 
+# shellcheck disable=SC2046
 if ! [ $(id -u) = 0 ]
 then
   setup_progress "STOP: Run sudo -i."
@@ -72,7 +73,7 @@ then
 fi
 
 function dehumanize () {
-  echo $(($(echo $1 | sed 's/G/*1024M/;s/M/*1024K/;s/K/*1024/')))
+  echo $(($(echo "$1" | sed 's/G/*1024M/;s/M/*1024K/;s/K/*1024/')))
 }
 
 REBOOT=false
@@ -87,16 +88,16 @@ then
   REBOOT=true
 fi
 
-INCREASE_ROOT_SIZE=$(($(dehumanize $INCREASE_ROOT_SIZE) / 512))
+INCREASE_ROOT_SIZE=$(($(dehumanize "$INCREASE_ROOT_SIZE") / 512))
 
-if [ "$INCREASE_ROOT_SIZE" != "0" -a ! -e /dev/mmcblkp03 ]
+if [ "$INCREASE_ROOT_SIZE" != "0" ] && [ ! -e /dev/mmcblkp03 ]
 then
   if [ ! -e /root/TESLAUSB_ROOT_PARTITION_INCREASED ]
   then
     touch /root/TESLAUSB_ROOT_PARTITION_INCREASED
     ROOTSTART=$(partx --show -g -o START /dev/mmcblk0p2)
     ROOTSIZE=$(partx --show -g -o SECTORS /dev/mmcblk0p2)
-    ROOTSIZE=$(($ROOTSIZE+$INCREASE_ROOT_SIZE))
+    ROOTSIZE=$((ROOTSIZE + INCREASE_ROOT_SIZE))
     echo "$ROOTSTART,$ROOTSIZE" | sfdisk --force /dev/mmcblk0 -N 2
     setup_progress "increased root partition size"
     REBOOT=true
@@ -157,7 +158,7 @@ function headless_setup_mark_setup_success () {
 function headless_setup_progress_flash () {
   if [ $USE_LED_FOR_SETUP_PROGRESS = "true" ] && [ $HEADLESS_SETUP = "true" ]
   then
-    /etc/stage_flash $1 || setup_progress "error calling stage_flash"
+    /etc/stage_flash "$1" || setup_progress "error calling stage_flash"
   fi
 }
 
@@ -185,10 +186,10 @@ function verify_configuration () {
 }
 
 function curlwrapper () {
-  setup_progress "curl $@"
+  setup_progress "curl $*"
   while ! curl --fail "$@"
   do
-    setup_progress "'curl $@' failed, retrying" > /dev/null
+    setup_progress "'curl $*' failed, retrying" > /dev/null
     sleep 3
   done
 }
@@ -205,7 +206,7 @@ function get_script () {
     export CURL_PREFIX=https://raw.githubusercontent.com/"$REPO"/teslausb/"$BRANCH"
   fi
 
-  curlwrapper -o "$local_path/$name" $CURL_PREFIX/"$remote_path"/"$name"
+  curlwrapper -o "$local_path/$name" "$CURL_PREFIX/$remote_path/$name"
   chmod +x "$local_path/$name"
   setup_progress "Downloaded $local_path/$name ..."
 }
@@ -230,7 +231,7 @@ function fix_cmdline_txt_modules_load ()
 {
   setup_progress "Fixing the modules-load parameter in /boot/cmdline.txt..."
   cp /boot/cmdline.txt ~
-  cat ~/cmdline.txt | sed 's/ modules-load=dwc2,g_ether/ modules-load=dwc2/' > /boot/cmdline.txt
+  sed 's/ modules-load=dwc2,g_ether/ modules-load=dwc2/' ~/cmdline.txt > /boot/cmdline.txt
   rm ~/cmdline.txt
   setup_progress "Fixed cmdline.txt."
 }
@@ -266,15 +267,17 @@ function create_usb_drive_backing_files () {
 }
 
 function configure_hostname () {
-  local old_host_name=$(hostname)
   local new_host_name="$TESLAUSB_HOSTNAME"
+  local old_host_name
+  old_host_name=$(hostname)
+
   # Set the specified hostname if it differs from the current name
   if [ "$new_host_name" != "$old_host_name" ]
   then
     setup_progress "Configuring the hostname..."
     sed -i -e "s/$old_host_name/$new_host_name/g" /etc/hosts
     sed -i -e "s/$old_host_name/$new_host_name/g" /etc/hostname
-    while ! hostnamectl set-hostname $new_host_name
+    while ! hostnamectl set-hostname "$new_host_name"
     do
       setup_progress "hostnamectl failed, retrying"
       sleep 1
@@ -308,7 +311,8 @@ function upgrade_packages () {
 }
 
 function set_timezone () {
-  if [ ! -z ${timezone:+x} ]
+  # shellcheck disable=SC2154
+  if [ -n "${timezone:+x}" ]
   then
     if [ -f "/usr/share/zoneinfo/$timezone" ]
     then
@@ -334,7 +338,8 @@ function set_timezone () {
 
 function cmd_install {
   /root/bin/remountfs_rw
-  get_script /root/bin $(basename $1) $(dirname $1)
+  # shellcheck disable=SC2046
+  get_script /root/bin $(basename "$1") $(dirname "$1")
   setup_progress "$1 installed in /root/bin/"
   exit
 }
@@ -354,10 +359,15 @@ function cmd_selfupdate {
 }
 
 function cmd_diagnose {
+  local hardware
+  local os
+
+  hardware=$( tr -d '\000' < /sys/firmware/devicetree/base/model )
+  os=$(. /etc/os-release && echo "$PRETTY_NAME")
   {
     echo -e "====== summary ======"
-    echo -e "hardware: $(cat /sys/firmware/devicetree/base/model | tr -d '\000')"
-    echo -e "OS: $(. /etc/os-release && echo $PRETTY_NAME)"
+    echo -e "hardware: ${hardware}"
+    echo -e "OS: ${os}"
     if [ -e /root/teslausb_setup_variables.conf ]
     then
       echo "headless setup config in /root"
@@ -402,16 +412,20 @@ function cmd_diagnose {
     then
       echo "cam disk image not in fstab"
     fi
-    LUN0=/sys/devices/platform/soc/??980000.usb/gadget/lun0/file
-    LUN1=/sys/devices/platform/soc/??980000.usb/gadget/lun1/file
-    if [ -e $LUN0 ]
-    then
-      echo "lun0 connected, from file $(cat $LUN0)"
-    fi
-    if [ -e $LUN1 ]
-    then
-      echo "lun1 connected, from file $(cat $LUN1)"
-    fi
+    for LUN0 in /sys/devices/platform/soc/??980000.usb/gadget/lun0/file
+    do
+      if [ -e "$LUN0" ]
+      then
+        echo "lun0 connected, from file $(cat "$LUN0")"
+      fi
+    done
+    for LUN1 in /sys/devices/platform/soc/??980000.usb/gadget/lun1/file
+    do
+      if [ -e "$LUN1" ]
+      then
+        echo "lun1 connected, from file $(cat "$LUN1")"
+      fi
+    done
     if ! blkid -L mutable > /dev/null
     then
       echo "mutable partition does not exist"
@@ -425,7 +439,7 @@ function cmd_diagnose {
       echo "mutable not in fstab"
     fi
 
-    numsnapshots=$(mount | grep snapshot | wc -l)
+    numsnapshots=$( mount | grep -c snapshot )
     echo "$numsnapshots snapshots mounted"
 
     if [ ! -e /boot/TESLAUSB_SETUP_FINISHED ]
@@ -435,9 +449,9 @@ function cmd_diagnose {
 
     echo -e "====== disk / images ======"
     parted -s /dev/mmcblk0 print || true
-    if [ ! -z "$usb_drive" ]
+    if [ -n "${usb_drive:+x}" ]
     then
-      parted -s $usb_drive print || true
+      parted -s "$usb_drive" print || true
     fi
     if [ -f /backingfiles/cam_disk.bin ]
     then
@@ -533,10 +547,10 @@ fi
 
 BRANCHNAME="$BRANCH"
 
-if [ ! -z ${1:+x} ]
+if [ -n "${1:+x}" ]
 then
   command=cmd_$1
-  if typeset -f $command > /dev/null
+  if typeset -f "$command" > /dev/null
   then
     shift
     $command "$@"
@@ -625,7 +639,7 @@ then
   fi
 fi
 
-if [ ! -z ${AP_SSID:+x} ]
+if [ -n "${AP_SSID:+x}" ]
 then
   get_script /tmp configure-ap.sh setup/pi
   /tmp/configure-ap.sh

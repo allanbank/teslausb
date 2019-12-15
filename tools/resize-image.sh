@@ -5,16 +5,16 @@ function usage {
 }
 
 function dehumanize () {
-  echo $(($(echo $1 | sed 's/G/*1024M/;s/M/*1024K/;s/K/*1024/')))
+  echo $(($(echo "$1" | sed 's/G/*1024M/;s/M/*1024K/;s/K/*1024/')))
 }
 
 function closeenough () {
   DIFF=$(($1-$2))
-  if [ $DIFF -ge 0 -a $DIFF -lt 1048576 ]
+  if [ $DIFF -ge 0 ] && [ $DIFF -lt 1048576 ]
   then
     true
     return
-  elif [ $DIFF -lt 0 -a $DIFF -gt -1048576 ]
+  elif [ $DIFF -lt 0 ] && [ $DIFF -gt -1048576 ]
   then
     true
     return
@@ -28,10 +28,10 @@ then
   exit
 fi
 
-NEWSIZE=$(dehumanize $1)
+NEWSIZE=$(dehumanize "$1")
 FILE=$2
 
-if [ ! -e $FILE ]
+if [ ! -e "$FILE" ]
 then
   echo "No such file: $FILE"
   usage
@@ -61,38 +61,37 @@ fi
 modprobe -r g_mass_storage
 
 # fsck the image, since we may have just yanked it out from under the host
-losetup -P -f $FILE
-DEVLOOP=$(losetup -j $FILE | awk '{print $1}' | sed 's/://')
+losetup -P -f "$FILE"
+DEVLOOP=$(losetup -j "$FILE" | awk '{print $1}' | sed 's/://')
 PARTLOOP=${DEVLOOP}p1
-fsck $PARTLOOP -- -a > /dev/null || true
+fsck "$PARTLOOP" -- -a > /dev/null || true
 
 # get size of the image file and the partition within
-IMAGE_SIZE=$(stat --format=%s $FILE)
-CURRENT_PARTITION_SIZE=$(($(partx -o SECTORS -g -n 1 $FILE) * 512 + 512))
-PARTITION_OFFSET=$(($(partx -o START -g -n 1 $FILE) * 512))
+CURRENT_PARTITION_SIZE=$(($(partx -o SECTORS -g -n 1 "$FILE") * 512 + 512))
+PARTITION_OFFSET=$(($(partx -o START -g -n 1 "$FILE") * 512))
 
 # fatresize doesn't seem to like extending partitions to the very end of the file
 # and sometimes segfault in that case, so add some padding
 PARTITION_PADDING=65536
 
-if closeenough $CURRENT_PARTITION_SIZE $NEWSIZE
+if closeenough $CURRENT_PARTITION_SIZE "$NEWSIZE"
 then
   echo "no sizing needed"
-elif [ $CURRENT_PARTITION_SIZE -lt $NEWSIZE ]
+elif [ $CURRENT_PARTITION_SIZE -lt "$NEWSIZE" ]
 then
   echo "growing"
-  fallocate -l $(($PARTITION_OFFSET+$NEWSIZE+$PARTITION_PADDING)) $FILE
-  fatresize -s $NEWSIZE $FILE > /dev/null
+  fallocate -l $((PARTITION_OFFSET + NEWSIZE + PARTITION_PADDING)) "$FILE"
+  fatresize -s "$NEWSIZE" "$FILE" > /dev/null
 else
   echo "shrinking"
-  if fatresize -s $NEWSIZE $FILE > /dev/null
+  if fatresize -s "$NEWSIZE" "$FILE" > /dev/null
   then
-    PARTITION_END=$(($(partx -o END -g -n 1 $FILE) * 512 + 512))
-    truncate -s $(($PARTITION_END+$PARTITION_PADDING)) $FILE
+    PARTITION_END=$(($(partx -o END -g -n 1 "$FILE") * 512 + 512))
+    truncate -s $((PARTITION_END + PARTITION_PADDING)) "$FILE"
   else
     echo "resize failed, skipping image resizing"
   fi
 fi
 
-losetup -d $DEVLOOP
+losetup -d "$DEVLOOP"
 

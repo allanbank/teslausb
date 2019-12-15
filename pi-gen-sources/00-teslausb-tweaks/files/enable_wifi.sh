@@ -19,12 +19,12 @@ function setup_progress () {
     SETUP_LOGFILE=/boot/teslausb-headless-setup.log
     echo "$( date ) : $1" >> "$SETUP_LOGFILE"
   fi
-    echo $1
+    echo "$1"
 }
 
 function enable_wifi () {
   setup_progress "Detecting whether to update wpa_supplicant.conf"
-  if [ ! -z ${SSID+x} ] && [ ! -z ${WIFIPASS+x} ]
+  if [ -n "${SSID+x}" ] && [ -n "${WIFIPASS+x}" ]
   then
       if [ ! -e /boot/WIFI_ENABLED ]
       then

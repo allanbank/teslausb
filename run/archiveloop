@@ -1,8 +1,8 @@
 #!/bin/bash -eu
 
-if [ "$BASH_SOURCE" != "$0" ]
+if [ "${BASH_SOURCE[0]}" != "$0" ]
 then
-  echo "$BASH_SOURCE must be executed, not sourced"
+  echo "${BASH_SOURCE[0]} must be executed, not sourced"
   return 1 # shouldn't use exit when sourced
 fi
 
@@ -56,7 +56,7 @@ function isPi4 {
 
 function timestamp () {
   local prefix=${1:-}
-  while IFS= read line
+  while IFS= read -r line
   do
     echo "$(date): $prefix$line"
   done
@@ -65,10 +65,10 @@ function timestamp () {
 function fix_errors_in_image () {
   local image="$1"
   log "Running fsck on $image..."
-  losetup -f -P $image
-  loopback=$(losetup -j $image | awk '{print $1}' | sed 's/://')
-  /sbin/fsck ${loopback}p1 -- -a |& timestamp '| ' >> "$LOG_FILE" || echo ""
-  losetup -d $loopback
+  losetup -f -P "$image"
+  loopback=$(losetup -j "$image" | awk '{print $1}' | sed 's/://')
+  /sbin/fsck "${loopback}p1" -- -a |& timestamp '| ' >> "$LOG_FILE" || echo ""
+  losetup -d "$loopback"
   log "Finished fsck on $image."
 }
 
@@ -93,7 +93,7 @@ function connect_usb_drives_to_host() {
 
 function wait_for_archive_to_be_reachable () {
   log "Waiting for archive to be reachable..."
-  while [ true ]
+  while true
   do
     if archive_is_reachable
     then
@@ -112,7 +112,7 @@ function wait_for_archive_to_be_reachable () {
 
 function retry () {
   local attempts=0
-  while [ true ]
+  while true
   do
     if eval "$@"
     then
@@ -209,7 +209,7 @@ function unmount_music_file () {
 
 function wait_for_archive_to_be_unreachable () {
   log "Waiting for archive to be unreachable..."
-  while [ true ]
+  while true
     do
       if ! retry archive_is_reachable
       then
@@ -227,7 +227,17 @@ function wait_for_archive_to_be_unreachable () {
 }
 
 function check_if_usb_gadget_is_mounted () {
-    if [ ! -d /sys/devices/platform/soc/??980000.usb/gadget/lun0 ]
+    local found="false"
+    for lun in /sys/devices/platform/soc/??980000.usb/gadget/lun0
+    do
+      if [ -d "$lun" ]
+      then
+        found="true"
+        break
+      fi
+    done
+
+    if [ "$found" = "false" ]
     then
         log "USB Gadget not mounted. Fixing files and remounting..."
         disconnect_usb_drives_from_host
@@ -242,12 +252,12 @@ function trim_free_space() {
   # Make sure the partition is mounted.
   if found=$(findmnt -n --mountpoint "$mount_point")
   then
-    loop=$(echo $found | awk '{print $2}')
-    image=$(losetup -l -n --output=BACK-FILE $loop)
-    log "Trimming free space in $mount_point, which has $(xfs_bmap $image | wc -l) extents"
+    loop=$(echo "$found" | awk '{print $2}')
+    image=$(losetup -l -n --output=BACK-FILE "$loop")
+    log "Trimming free space in $mount_point, which has $(xfs_bmap "$image" | wc -l) extents"
     if fstrim "$mount_point" >> "$LOG_FILE" 2>&1
     then
-      log "Trim complete, image now has  $(xfs_bmap $image | wc -l) extents"
+      log "Trim complete, image now has  $(xfs_bmap "$image" | wc -l) extents"
     else
       log "Trimming free space in $mount_point failed."
     fi
@@ -280,7 +290,7 @@ function archive_teslacam_clips () {
   
     log "There are $DIR_COUNT event folder(s) with $FILE_COUNT file(s) to move."
   
-    if [ $DIR_COUNT -gt 0 ]
+    if [ "$DIR_COUNT" -gt 0 ]
     then
         log "Starting recording archiving: $DIR_COUNT event folder(s) with $FILE_COUNT file(s)"
 
@@ -363,7 +373,8 @@ function archive_clips () {
 }
 
 function truncate_log () {
-  local log_length=$( wc -l "$LOG_FILE" | cut -d' ' -f 1 )
+  local log_length
+  log_length=$( wc -l "$LOG_FILE" | cut -d' ' -f 1 )
   if [ "$log_length" -gt 10000 ]
   then
     log "Truncating log..."
@@ -412,6 +423,7 @@ function doubleblink () {
 
 function set_time () {
   log "Waiting for time to be set by ntpd..."
+  # shellcheck disable=SC2034
   for i in {1..10}
   do
     if ntp-wait --tries=1 --sleep=1
@@ -506,7 +518,7 @@ else
   connect_usb_drives_to_host
 fi
 
-while [ true ]
+while true
 do
   slowblink
 
@@ -516,7 +528,7 @@ do
 
   set_time
 
-  sleep ${ARCHIVE_DELAY:-20}
+  sleep "${ARCHIVE_DELAY:-20}"
 
   if [ "${SNAPSHOTS_ENABLED:-true}" = "true" ]
   then

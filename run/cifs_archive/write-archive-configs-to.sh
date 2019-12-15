@@ -2,5 +2,8 @@
 
 FILE_PATH="$1"
 
-echo "username=$shareuser" > "$FILE_PATH"
-echo "password=$sharepassword" >> "$FILE_PATH"
+# shellcheck disable=SC2154
+(
+  echo "username=$shareuser"
+  echo "password=$sharepassword"
+) > "$FILE_PATH"
