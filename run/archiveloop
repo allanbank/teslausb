@@ -213,8 +213,8 @@ function fix_errors_in_image () {
   log "Running fsck on $image..."
   losetup -f -P "$image"
   loopback=$(losetup -j "$image" | awk '{print $1}' | sed 's/://')
-  /sbin/fsck "${loopback}p1" -- -a |& timestamp '| ' >> "$LOG_FILE" || echo ""
-  losetup -d "$loopback"
+  /sbin/fsck "${loopback}p1" -- -a |& timestamp '| ' >> "$LOG_FILE" || true
+  losetup -d "$loopback" || true
   log "Finished fsck on $image."
 }
 function fix_errors_in_files () {
