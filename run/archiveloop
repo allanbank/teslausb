@@ -458,8 +458,15 @@ then
       log "Moving ${group}/.../${filename}"
       # Set the copy to not interfere with the Tesla's I/O
       ionice -t -c 3 rm -f "${destdir}/_${filename}"
-      ionice -t -c 3 mv --force "${file}" "${destdir}/_${filename}"
-      mv "${destdir}/_${filename}" "${destfile}"
+      # Use dd to do a copy with the direct flag to avoid trashing the file cache.
+      if ionice -t -c 3 dd bs=1M status=none iflag=direct,noatime if="${file}" oflag=direct of="${destdir}/_${filename}" |& timestamp '| ' >> ${LOG_FILE}
+      then
+        touch --reference "${file}" "${destdir}/_${filename}" || true
+        if mv "${destdir}/_${filename}" "${destfile}"
+        then
+          rm -f "${file}"
+        fi
+      fi
     else
       log "Removing ${group}/.../${filename} - Already copied."
       rm "${file}"

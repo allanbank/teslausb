@@ -92,8 +92,10 @@ function processclips() {
       then 
         log "${op_future} '${extpath}/${file}'"
         mkdir --parents "${destdir}"
-        if ionice -t -c 3 cp --preserve=timestamps --force "${base}/${file}" "${destdir}/_${filename}"
+        # Use dd to do a copy with the direct flag to avoid trashing the file cache.
+        if ionice -t -c 3 dd bs=1M status=none iflag=direct,noatime if="${base}/${file}" oflag=direct of="${destdir}/_${filename}" |& timestamp '| ' >> "${LOG_FILE}"
         then
+          touch --reference "${base}/${file}" "${destdir}/_${filename}" || true
           if mv --force "${destdir}/_${filename}" "${destdir}/${filename}"
           then 
             if [ "${op}" == "Move" ] 
