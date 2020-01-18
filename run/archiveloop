@@ -587,6 +587,7 @@ then
       if [ "${prefilecount}" = "${postfilecount}" ]
       then
         # There were no new files in the snapshot.
+
         inactivecount=$((inactivecount+1))
         if [ $inactivecount -gt 1 ] # About 30 minutes.
         then
@@ -618,9 +619,11 @@ then
             /root/bin/archive-clips.sh -c -s "/backingfiles/TeslaCam" -p RecentClips
           fi
         fi
-        if ! /root/bin/disconnect-archive.sh
+        if /root/bin/disconnect-archive.sh
         then
-          log "SNAP: Disconnect of the archive failed."
+          log "SNAP: Periodic Archive Finished. Disconnected archive."
+        else
+          log "SNAP: Periodic Archive Finished. Disconnecting archive failed."
         fi
       fi
     done
